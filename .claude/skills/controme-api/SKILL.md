@@ -38,7 +38,7 @@ The dev container has no route to the home network by design.
 | `upcomingoffsets/` | no | `upcomingoffsets.json` | houses/rooms → module → `[[iso_time, id|null, kind], …]` |
 | `fps/` | no | `fps.json` | `{"<fps_id>": {...}}` |
 | `vtr/`, `wetter_pro/` | no | `vtr_empty.json`, `wetter_pro_empty.json` | `{}` when not configured |
-| `roomoffsets/` | no | `roomoffsets_empty.json`, `roomoffsets_api.json`, `roomoffsets_after_house.json` | `[]` when no API offsets set – also right after setting room/house offsets of 0 K (shape with non-zero offsets still unknown) |
+| `roomoffsets/` | no | `roomoffsets_empty.json`, `roomoffsets_api.json`, `roomoffsets_after_house.json` | `[]` when no API offsets set. Live test: `set-roomoffset` and `set-houseoffset` sent with `offset=0` (= remove) → `roomoffsets/` stayed `[]`. The shape **with an active offset (≠ 0) is not yet recorded**: until then use only a `synthetic_roomoffsets_*.json` fixture, listed as synthetic in the fixture README – never present it as recorded |
 
 ## Write endpoints (official docs)
 
@@ -59,7 +59,7 @@ offsets) – plausibility limits belong to the caller.
 | `set_default_duration` | `quickui/` | `duration` (default for temporary API commands and Quick-UI) |
 | `set_operating_mode` | `rooms/{room}/` or `rooms/` (all rooms) | `action=betriebsart`, `value` ∈ `heating`, `cooling`, `off`, `on` |
 | `set_room_offset` | `roomoffset/{room}/` | `offset` (decimal), `offset_name` (string); value lives only **10 min** in a cache → refresh regularly |
-| `set_house_offset` | `houseoffset/` | **undocumented** – the docs end after the endpoint name; fields assumed like `roomoffset` (`offset`, `offset_name`). Live test: accepted with HTTP 200; the effect of a non-zero offset is **not yet verified** |
+| `set_house_offset` | `houseoffset/` | **undocumented** – the docs end after the endpoint name; fields assumed like `roomoffset` (`offset`, `offset_name`). Live test: accepted with HTTP 200 for `offset=0` (= remove); the effect of a non-zero offset is **not yet verified** |
 
 - Not live-tested yet: `set_scene`, `set_default_duration`, `set_operating_mode` (they change state
   visibly; only the maintainer may test them live).

@@ -219,6 +219,7 @@ class ContromeClient:
         """Set an API offset (K) for a room (``roomoffset/<room>/``).
 
         Controme keeps the value only for **10 minutes** (cache); refresh it regularly.
+        An offset of ``0`` removes it (live test: ``roomoffsets/`` stays ``[]`` afterwards).
         """
         await self._post(
             f"roomoffset/{_id(room_id, 'room_id')}",
@@ -229,7 +230,8 @@ class ContromeClient:
         """Set an API offset (K) for the whole house (``houseoffset/``).
 
         The official docs list this endpoint without parameters. The fields are **assumed** to
-        match ``roomoffset`` (``offset``, ``offset_name``) and still need live verification.
+        match ``roomoffset`` (``offset``, ``offset_name``); the live test accepted them with
+        HTTP 200 for ``0`` (= remove). The effect of a non-zero offset is not yet verified.
         """
         await self._post("houseoffset", {"offset": _number(offset), "offset_name": _name(name)})
 

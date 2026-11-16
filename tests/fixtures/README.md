@@ -33,8 +33,12 @@ were chosen to have no effect (unchanged setpoint, 0 K offsets, temporary mode e
 |---|---|---|
 | `temps_temporary_mode.json` | `temps/` | after `set-ziel` (unchanged value, 30 min) in room 23: `is_temporary_mode: true`, `mode_end_datetime: "2026-11-15 14:50"`, `remaining_time: 1804` (int seconds; `""` otherwise) |
 | `room_details_temporary_mode.json` | `room_details/` | same moment: `activeMode` id `-1`, `mod: "quickui"`, text = end time `"14:50"`, `use_offsets: false`; `sceneControl.currentSceneName: null`, `afterTimerSceneName`/`afterTimerTemperature` = scene after the temporary mode, `remainingTime: "00:30:00"` (≈ original duration, not time left → use `modeEndDatetime`), `originalDuration: 30`; `dominantOffsetSource` is `null` (room 23) or `luftfeuchte` in some rooms |
-| `roomoffsets_api.json` | `roomoffsets/` | after `set-roomoffset` with 0 K → still `[]` |
-| `roomoffsets_after_house.json` | `roomoffsets/` | after `set-houseoffset` with 0 K → still `[]` |
+| `roomoffsets_api.json` | `roomoffsets/` | after `set-roomoffset` with `offset=0` (= remove) → still `[]` |
+| `roomoffsets_after_house.json` | `roomoffsets/` | after `set-houseoffset` with `offset=0` (= remove) → still `[]` |
+
+The shape of `roomoffsets/` with an **active offset (≠ 0) is not yet recorded**. Until a live
+recording exists, tests needing it must use a `synthetic_roomoffsets_*.json` fixture listed under
+*Synthetic fixtures* below (none exists yet, as nothing parses `roomoffsets/` so far).
 
 Raw HTTP responses (`curl -i`, cookies removed) of the write endpoints live in `write/`:
 
@@ -43,8 +47,8 @@ Raw HTTP responses (`curl -i`, cookies removed) of the write endpoints live in `
 | `write/soll_403.txt` | `set-soll`, wrong password | `403 Forbidden`, empty `text/html` body |
 | `write/soll_ok.txt` | `set-soll` | `200 OK`, empty `text/html` body |
 | `write/ziel_ok.txt` | `set-ziel`, `duration=30` | `200 OK`, JSON `{"duration": 30, "full_expire_time": "2026-11-15 14:50", "temperature": 19.0, "time": "14:50"}` |
-| `write/roomoffset_ok.txt` | `set-roomoffset`, `offset=0`, `offset_name` | `200 OK`, empty `text/html` body |
-| `write/houseoffset_ok.txt` | `set-houseoffset`, `offset=0`, `offset_name` | `200 OK`, empty `text/html` body (fields accepted; effect not visible with 0 K) |
+| `write/roomoffset_ok.txt` | `set-roomoffset`, `offset=0` (= remove), `offset_name` | `200 OK`, empty `text/html` body |
+| `write/houseoffset_ok.txt` | `set-houseoffset`, `offset=0` (= remove), `offset_name` | `200 OK`, empty `text/html` body (fields accepted; effect not visible with 0 K) |
 
 ## Synthetic fixtures
 
