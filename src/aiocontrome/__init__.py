@@ -35,12 +35,14 @@ from .models import (
     UpcomingOffsets,
 )
 from .outputs import OutputTypeDetector
+from .redact import REDACTED, redact
 from .sensors import LastSeenTracker, detect_connection, is_stale
 
 __version__ = "0.0.1"
 
 __all__ = [
     "DEFAULT_DURATION",
+    "REDACTED",
     "ActiveMode",
     "ContromeApiDisabledError",
     "ContromeAuthError",
@@ -77,4 +79,5 @@ __all__ = [
     "__version__",
     "detect_connection",
     "is_stale",
+    "redact",
 ]

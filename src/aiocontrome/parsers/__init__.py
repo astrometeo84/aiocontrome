@@ -3,6 +3,7 @@
 from .fps import parse_fps
 from .info import parse_info
 from .outs import parse_outs
+from .passthrough import parse_passthrough
 from .rltemps import parse_rltemps
 from .room_details import parse_room_details
 from .temps import parse_temps
@@ -12,6 +13,7 @@ __all__ = [
     "parse_fps",
     "parse_info",
     "parse_outs",
+    "parse_passthrough",
     "parse_rltemps",
     "parse_room_details",
     "parse_temps",

@@ -33,6 +33,7 @@ src/aiocontrome/
   outputs.py     Ausgangstyp (relay / position) inkl. Auto-Erkennung je Etage
   sensors.py     Erkennung der Anbindung aus der Fühler-ID; Zeitstempel-Parsing; Veraltung
   errors.py      ContromeError, ContromeConnectionError, ContromeAuthError, ContromeApiDisabledError …
+  redact.py      Schwärzung von Rohdaten (Fühler-IDs, MACs, IPs) für Diagnose-Downloads
 ```
 - Kein Home-Assistant-Import, keine globale Session: Session wird übergeben.
 - Zeitstempel als `datetime` mit Zeitzone; Controme liefert lokale Zeit → Zeitzone als Parameter.

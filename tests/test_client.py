@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 import pytest
-from conftest import FakeControme, api_path
+from conftest import FakeControme, api_path, load_fixture
 
 from aiocontrome import (
     ContromeAuthError,
@@ -168,6 +168,104 @@ async def test_get_upcoming_offsets(client: ContromeClient, controme_server: Fak
 async def test_get_fps(client: ContromeClient, controme_server: FakeControme) -> None:
     controme_server.add_fixture(api_path("fps"), "fps.json")
     assert len(await client.get_fps()) == 11
+
+
+@pytest.mark.parametrize(
+    ("method", "endpoint", "fixture"),
+    [
+        ("get_vtr", "vtr", "vtr_empty.json"),
+        ("get_weather_pro", "wetter_pro", "wetter_pro_empty.json"),
+    ],
+)
+async def test_passthrough_endpoints(
+    client: ContromeClient,
+    controme_server: FakeControme,
+    method: str,
+    endpoint: str,
+    fixture: str,
+) -> None:
+    # Responses for the same path are served in order.
+    controme_server.add_fixture(api_path(endpoint), fixture)
+    controme_server.add(api_path(endpoint), {"x": [1, {"y": 2}]})
+    assert await getattr(client, method)() == {}
+    assert await getattr(client, method)() == {"x": (1, {"y": 2})}
+
+
+# --- raw access -------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "path", "fixture"),
+    [
+        ("temps", "temps", "temps.json"),
+        ("/outs/", "outs", "outs_pro_a.json"),
+        ("rltemps/19", "rltemps/19", "rltemps_19.json"),
+        ("fps", "fps", "fps.json"),
+    ],
+)
+async def test_get_raw_returns_unparsed_json(
+    client: ContromeClient, controme_server: FakeControme, endpoint: str, path: str, fixture: str
+) -> None:
+    controme_server.add_fixture(api_path(path), fixture)
+    assert await client.get_raw(endpoint) == load_fixture(fixture)
+    (request,) = controme_server.requests_to(api_path(path))
+    assert request.authorization is None
+
+
+async def test_get_raw_room_details_uses_basic_auth(
+    client: ContromeClient, controme_server: FakeControme
+) -> None:
+    controme_server.add_fixture(api_path("room_details"), "room_details_morning.json")
+    assert await client.get_raw("room_details") == load_fixture("room_details_morning.json")
+    (request,) = controme_server.requests_to(api_path("room_details"))
+    assert request.authorization == BASIC_U_P
+
+
+async def test_get_raw_room_details_without_credentials(
+    auto_client: ContromeClient, controme_server: FakeControme
+) -> None:
+    with pytest.raises(ContromeAuthError, match="room_details requires"):
+        await auto_client.get_raw("room_details")
+    assert controme_server.requests == []
+
+
+async def test_get_raw_returns_error_objects_unchanged(
+    client: ContromeClient, controme_server: FakeControme
+) -> None:
+    controme_server.add_fixture(api_path("vtr"), "apiv1_disabled.json")
+    assert (await client.get_raw("vtr"))["error"] == "api_disabled"
+
+
+async def test_get_raw_http_errors_raise(
+    client: ContromeClient, controme_server: FakeControme
+) -> None:
+    controme_server.add_broken_json(api_path("temps"))
+    with pytest.raises(ContromeResponseError, match="Invalid JSON"):
+        await client.get_raw("temps")
+    with pytest.raises(ContromeNotFoundError):
+        await client.get_raw("nope")
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "",
+        "/",
+        "../set/json",
+        "temps/../info",
+        "temps?x=1",
+        "rltemps/0",
+        "rltemps/abc",
+        "Temps",
+        "a b",
+    ],
+)
+async def test_get_raw_rejects_invalid_endpoints(
+    client: ContromeClient, controme_server: FakeControme, endpoint: str
+) -> None:
+    with pytest.raises(ValueError, match="Invalid endpoint"):
+        await client.get_raw(endpoint)
+    assert controme_server.requests == []
 
 
 async def test_every_url_has_trailing_slash(
