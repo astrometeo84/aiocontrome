@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Checks (Python ${{ matrix.python }})
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      # The uv version is pinned on purpose: without it, setup-uv installs the version bundled
+      # with the action, which may be older than the local one and not understand the uv.lock
+      # format ("revision"), so --locked fails although everything is fine locally.
+      # Raise it together with the local uv.
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          version: "0.13.8"
+          python-version: ${{ matrix.python }}
+      # --locked fails if uv.lock does not match pyproject.toml (e.g. version bumped without
+      # running `uv lock`).
+      - run: uv sync --locked --all-extras
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src
+      - run: uv run pytest
