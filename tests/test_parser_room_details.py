@@ -229,6 +229,69 @@ def test_dominant_offset_source_may_be_null_or_humidity() -> None:
     assert {r.dominant_offset_source for r in rooms.values()} >= {None, "luftfeuchte", "wetter"}
 
 
+# --- API offsets (live test 2026-11-17: set-roomoffset +1 K on room 23) -------------------
+
+API_OFFSET = "room_details_api_offset_active.json"
+
+
+def test_api_offset_is_only_visible_in_room_details() -> None:
+    # roomoffsets/ does not list API offsets: it stayed [] while room and house offsets were
+    # active (observed live, not recorded -> synthetic fixture). The recorded responses after
+    # set-offset with 0 are [] as well.
+    assert load_fixture("synthetic_roomoffsets_active.json") == []
+    assert load_fixture("roomoffsets_api.json") == []
+    assert load_fixture("roomoffsets_after_house.json") == []
+    assert _rooms(API_OFFSET)[23].offsets["api"] == Offset(room=1.0, house=0.0)
+
+
+def test_api_offset_house_key_only_until_room_offset_was_set() -> None:
+    # offsets["api"] is {"haus": x}; "raum" only appears once a room offset was set.
+    raw = {r["id"]: r["offsets"]["api"] for f in load_fixture(API_OFFSET) for r in f["rooms"]}
+    assert raw[23] == {"raum": 1.0, "haus": 0.0}
+    assert all(api == {"haus": 0.0} for room_id, api in raw.items() if room_id != 23)
+    rooms = _rooms(API_OFFSET)
+    assert all(r.offsets["api"] == Offset(0.0, 0.0) for i, r in rooms.items() if i != 23)
+
+
+@pytest.mark.parametrize("path", sorted(FIXTURES.glob("room_details_*.json")), ids=lambda p: p.name)
+def test_total_offset_includes_all_sources(path: Path) -> None:
+    for room in parse_room_details(load_fixture(path.name), BERLIN):
+        summed = sum(o.room + o.house for o in room.offsets.values())
+        assert room.total_offset == pytest.approx(summed, abs=0.011)
+        if room.target_temperature is not None:
+            expected = room.setpoint + room.total_offset
+            assert room.target_temperature == pytest.approx(expected, abs=0.011)
+
+
+def test_total_offset_contains_api_offset() -> None:
+    room = _rooms(API_OFFSET)[23]
+    assert room.offsets["Wetter"].room == pytest.approx(-0.4)
+    assert room.total_offset == pytest.approx(-0.4 + 1.0)
+    assert room.target_temperature == pytest.approx(18.8 + 0.6)
+
+
+def test_dominant_offset_source_ignores_api_offset() -> None:
+    # The API offset (+1 K) is the largest, yet the dominant source stays "wetter".
+    room = _rooms(API_OFFSET)[23]
+    assert abs(room.offsets["api"].room) > abs(room.offsets["Wetter"].room)
+    assert room.dominant_offset_source == "wetter"
+
+
+def test_offset_sources_vary_per_room() -> None:
+    rooms = _rooms(API_OFFSET)
+    assert "Kalender" in rooms[23].offsets
+    assert "Kalender" not in rooms[1].offsets
+    assert "Geolocation" not in rooms[18].offsets
+    assert "Geolocation" in rooms[1].offsets
+
+
+def test_unknown_offset_sources_are_kept() -> None:
+    data = load_fixture(API_OFFSET)
+    data[0]["rooms"][0]["offsets"]["Neue Quelle"] = {"raum": 0.5, "haus": 0.0}
+    room = parse_room_details(data, BERLIN)[0]
+    assert room.offsets["Neue Quelle"] == Offset(0.5, 0.0)
+
+
 @pytest.mark.parametrize("path", sorted(FIXTURES.glob("room_details_*.json")), ids=lambda p: p.name)
 def test_pseudonymized_scene_names(path: Path) -> None:
     expected = {
