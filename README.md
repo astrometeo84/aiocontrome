@@ -51,6 +51,25 @@ use them only in the local network. Values are **not range-checked** – the API
 limits, so plausibility checks are up to the caller. `set_house_offset` is not documented in
 detail; its fields are assumed to match `set_room_offset`.
 
+An offset of `0` removes it. API offsets are only visible in `get_room_details()` →
+`offsets["api"]`; the `roomoffsets/` endpoint does not list them.
+
+### Raw data and diagnostics
+
+```python
+from aiocontrome import redact
+
+raw = {
+    endpoint: await client.get_raw(endpoint)  # unparsed JSON; room_details uses Basic Auth
+    for endpoint in ("info", "temps", "outs", "room_details", "upcomingoffsets", "fps")
+}
+safe = redact(raw)  # sensor IDs/MACs → "**onewire_temperature_1**", IPs → "**REDACTED**"
+```
+
+Redact all responses in **one** call: the same sensor ID then gets the same placeholder
+everywhere. Room names and sensor descriptions are kept. `get_vtr()` and `get_weather_pro()`
+return the payload as a read-only mapping, because its shape is not known yet.
+
 Errors derive from `ContromeError` (`ContromeConnectionError`, `ContromeAuthError`,
 `ContromeNotFoundError`, `ContromeResponseError`, …).
 

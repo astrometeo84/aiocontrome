@@ -1,4 +1,4 @@
-"""Async client for the local Controme HTTP API (read endpoints)."""
+"""Async client for the local Controme HTTP API."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import math
+import re
 from collections.abc import Mapping
 from datetime import tzinfo
 from typing import Any, Final, Literal
@@ -36,6 +37,7 @@ from .parsers import (
     parse_fps,
     parse_info,
     parse_outs,
+    parse_passthrough,
     parse_rltemps,
     parse_room_details,
     parse_temps,
@@ -52,6 +54,10 @@ DEFAULT_DURATION: Final = "default"
 """Use the configured default duration (see ``set_default_duration``)."""
 type Duration = int | Literal["default"]
 """Duration in minutes, or ``DEFAULT_DURATION``."""
+
+_RAW_ENDPOINT = re.compile(r"[a-z_]+(?:/[1-9][0-9]*)?")
+"""Endpoint names accepted by ``get_raw``: a name, optionally followed by a numeric ID."""
+_BASIC_AUTH_ENDPOINTS = frozenset({"room_details"})
 
 _ERROR_BODY_READ_LIMIT = 1024
 """Bytes read from error responses (404 pages are ~240 kB; only an excerpt is kept)."""
@@ -131,8 +137,7 @@ class ContromeClient:
 
     async def get_room_details(self) -> tuple[RoomDetails, ...]:
         """Detailed room state (``room_details/``, Basic Auth)."""
-        if self._auth_header is None:
-            raise ContromeAuthError("room_details requires username and password")
+        self._require_basic_auth("room_details")
         data = await self._get("room_details", house_id=await self._house(), auth=True)
         return parse_room_details(data, self._tz)
 
@@ -144,6 +149,43 @@ class ContromeClient:
     async def get_fps(self) -> Mapping[int, Fps]:
         """Free programmable control blocks (``fps/``)."""
         return parse_fps(await self._get("fps", house_id=await self._house()), self._tz)
+
+    async def get_vtr(self) -> Mapping[str, Any]:
+        """Flow temperature control (``vtr/``), deep-frozen but otherwise unparsed.
+
+        The shape is unknown (the recorded system returns ``{}``), so no model exists yet.
+        """
+        return parse_passthrough(await self._get("vtr", house_id=await self._house()), "vtr/")
+
+    async def get_weather_pro(self) -> Mapping[str, Any]:
+        """Weather Pro data (``wetter_pro/``), deep-frozen but otherwise unparsed.
+
+        The shape is unknown (the recorded system returns ``{}``), so no model exists yet.
+        """
+        data = await self._get("wetter_pro", house_id=await self._house())
+        return parse_passthrough(data, "wetter_pro/")
+
+    async def get_raw(self, endpoint: str) -> Any:
+        """Decoded JSON of a read endpoint, unparsed (e.g. for a diagnostics download).
+
+        ``endpoint`` is the path below ``get/json/v1/<house>/``, e.g. ``"temps"``,
+        ``"rltemps/23"`` or ``"room_details"`` (sent with Basic Auth). HTTP and JSON errors
+        raise as usual, but error objects in the payload (e.g. ``api_disabled``) are returned
+        as they are. Use ``aiocontrome.redact`` before sharing the result.
+        """
+        name = endpoint.strip().strip("/")
+        if not _RAW_ENDPOINT.fullmatch(name):
+            raise ValueError(
+                f"Invalid endpoint {endpoint!r}, expected e.g. 'temps' or 'rltemps/23'"
+            )
+        auth = name in _BASIC_AUTH_ENDPOINTS
+        if auth:
+            self._require_basic_auth(name)
+        return await self._get(name, house_id=await self._house(), auth=auth)
+
+    def _require_basic_auth(self, endpoint: str) -> None:
+        if self._auth_header is None:
+            raise ContromeAuthError(f"{endpoint} requires username and password")
 
     # --- house ID ---------------------------------------------------------------------------
 
