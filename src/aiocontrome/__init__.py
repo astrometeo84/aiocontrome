@@ -1,5 +1,7 @@
 """Async client for the local HTTP API of Controme Smart-Heat."""
 
+from importlib.metadata import version
+
 from .client import DEFAULT_DURATION, ContromeClient, Duration
 from .errors import (
     ContromeApiDisabledError,
@@ -38,7 +40,8 @@ from .outputs import OutputTypeDetector
 from .redact import REDACTED, redact
 from .sensors import LastSeenTracker, detect_connection, is_stale
 
-__version__ = "0.0.1"
+__version__ = version("aiocontrome")
+"""Installed package version (single source: ``pyproject.toml``)."""
 
 __all__ = [
     "DEFAULT_DURATION",

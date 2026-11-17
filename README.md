@@ -2,7 +2,7 @@
 
 Async Python client for the local HTTP API of **Controme Smart-Heat** (tested with NOVA 27).
 
-> Status: early development – not yet published on PyPI.
+> Status: alpha – the API may still change before 1.0.
 
 - Documented read/write endpoints of the local JSON API (`get/json/v1`, `set/json/v1`)
 - Parsing of known firmware quirks (output types relay vs. 0–10 V, sensor connection types,
