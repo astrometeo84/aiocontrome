@@ -219,7 +219,8 @@ class ContromeClient:
         """Set an API offset (K) for a room (``roomoffset/<room>/``).
 
         Controme keeps the value only for **10 minutes** (cache); refresh it regularly.
-        An offset of ``0`` removes it (live test: ``roomoffsets/`` stays ``[]`` afterwards).
+        An offset of ``0`` removes it. Read it back via ``get_room_details()`` →
+        ``offsets["api"]``; ``roomoffsets/`` does not list API offsets.
         """
         await self._post(
             f"roomoffset/{_id(room_id, 'room_id')}",

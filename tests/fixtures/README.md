@@ -36,9 +36,25 @@ were chosen to have no effect (unchanged setpoint, 0 K offsets, temporary mode e
 | `roomoffsets_api.json` | `roomoffsets/` | after `set-roomoffset` with `offset=0` (= remove) → still `[]` |
 | `roomoffsets_after_house.json` | `roomoffsets/` | after `set-houseoffset` with `offset=0` (= remove) → still `[]` |
 
-The shape of `roomoffsets/` with an **active offset (≠ 0) is not yet recorded**. Until a live
-recording exists, tests needing it must use a `synthetic_roomoffsets_*.json` fixture listed under
-*Synthetic fixtures* below (none exists yet, as nothing parses `roomoffsets/` so far).
+## Live API offset test (2026-11-17)
+
+`set-roomoffset` with `offset=1` on room 23 → `200 OK`; a house offset was set (and reset to 0) before.
+
+| File | Endpoint | Scenario |
+|---|---|---|
+| `room_details_api_offset_active.json` | `room_details/` | room 23: `offsets["api"] = {"raum": 1.0, "haus": 0.0}`, all other rooms `{"haus": 0.0}`; `totalOffset` 0.6 = Wetter −0.4 + api 1.0, `targetTemperature` 19.4 = `setpoint` 18.8 + 0.6; `dominantOffsetSource` stays `wetter`; offset sources vary per room (`Kalender` only in room 23, `Geolocation` missing in rooms 18, 24, 26) |
+
+Findings:
+
+1. `roomoffsets/` does **not** list API offsets – it stayed `[]` while room and house offsets were
+   active (response not recorded; see `synthetic_roomoffsets_active.json`). The only source is
+   `room_details/` → `offsets["api"]`.
+2. `offsets["api"]` is `{"haus": x}`; the key `"raum"` appears only once a room offset was set and
+   stays (with `0.0`) after a reset. Before any API offset it is `{}` (older fixtures).
+3. `totalOffset` includes the API offset; `targetTemperature = setpoint + totalOffset` (holds in all
+   `room_details_*` fixtures).
+4. `dominantOffsetSource` ignores the API offset.
+5. Offset sources vary per room; the parser keeps any key.
 
 Raw HTTP responses (`curl -i`, cookies removed) of the write endpoints live in `write/`:
 
@@ -58,4 +74,5 @@ the documented behaviour to cover cases the recorded system cannot produce.
 | File | Endpoint | Scenario |
 |---|---|---|
 | `synthetic_outs_relay.json` | `outs/` | relay gateway: values 0/1 only, key with leading space |
+| `synthetic_roomoffsets_active.json` | `roomoffsets/` | while room and house API offsets are active: `[]`. Mirrors the live observation of 2026-11-17, but the response itself was **not recorded** |
 | `synthetic_404_debug.html` | any unknown route | shortened Django debug 404 page (the real one is ~240 kB); tests pad it to full size |
