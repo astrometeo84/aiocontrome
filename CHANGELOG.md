@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Room and sensor classification: `Room.is_controlled` (room has a room temperature sensor),
+  `Room.return_sensors` (all other sensors except 1-Wire humidity; matches `rltemps/`),
+  `Room.system_sensors` and `House.system_sensors` (sensors of rooms without control).
+
 ## [0.1.0] - 2026-11-17
 
 First public release. Tested against fixtures recorded from a Controme Smart-Heat NOVA 27

@@ -144,6 +144,35 @@ class Room:
         """The sensor marked as room temperature sensor, if any."""
         return next((s for s in self.sensors if s.is_room_sensor), None)
 
+    @property
+    def is_controlled(self) -> bool:
+        """Whether Controme controls this room.
+
+        ``temps/`` has no explicit flag. Rooms without a room temperature sensor are pseudo rooms
+        that only hold system sensors (e.g. flow temperatures of a heating circuit distributor).
+        """
+        return self.room_sensor is not None
+
+    @property
+    def return_sensors(self) -> tuple[Sensor, ...]:
+        """Return-flow sensors of a controlled room; empty for rooms without control.
+
+        ``temps/`` does not mark them: every sensor that is neither the room sensor nor a 1-Wire
+        humidity sensor counts as return-flow sensor (matches ``rltemps/`` for all recorded rooms).
+        """
+        if not self.is_controlled:
+            return ()
+        return tuple(
+            s
+            for s in self.sensors
+            if not s.is_room_sensor and s.connection is not SensorConnection.ONEWIRE_HUMIDITY
+        )
+
+    @property
+    def system_sensors(self) -> tuple[Sensor, ...]:
+        """Sensors of a room without control (all of them); empty for controlled rooms."""
+        return () if self.is_controlled else self.sensors
+
 
 @dataclass(frozen=True, slots=True)
 class Floor:
@@ -166,6 +195,11 @@ class House:
     def rooms(self) -> tuple[Room, ...]:
         """All rooms of all floors."""
         return tuple(room for floor in self.floors for room in floor.rooms)
+
+    @property
+    def system_sensors(self) -> tuple[Sensor, ...]:
+        """Sensors that serve no room as room or return-flow sensor (from rooms without control)."""
+        return tuple(sensor for room in self.rooms for sensor in room.system_sensors)
 
 
 @dataclass(frozen=True, slots=True)
