@@ -122,6 +122,38 @@ def test_system_room(house: House) -> None:
     assert SensorConnection.VIRTUAL in connections
 
 
+def test_controlled_rooms(house: House) -> None:
+    uncontrolled = [r.id for r in house.rooms if not r.is_controlled]
+    assert uncontrolled == [26]
+    # Radio sensor without outputs and without current value still counts as controlled.
+    assert _room(house, 24).is_controlled
+
+
+@pytest.mark.parametrize("room_id", [1, 14, 15, 16, 17, 18, 19, 20, 23])
+def test_return_sensors_match_rltemps(house: House, room_id: int) -> None:
+    expected = [s["name"] for s in load_fixture(f"rltemps_{room_id}.json")]
+    assert [s.id for s in _room(house, room_id).return_sensors] == expected
+
+
+def test_return_sensors_exclude_humidity_and_room_sensor(house: House) -> None:
+    room = _room(house, 16)
+    assert all(not s.is_room_sensor for s in room.return_sensors)
+    assert all(s.connection is not SensorConnection.ONEWIRE_HUMIDITY for s in room.return_sensors)
+    assert _room(house, 24).return_sensors == ()
+    assert _room(house, 26).return_sensors == ()
+
+
+def test_system_sensors(house: House) -> None:
+    descriptions = [s.description for s in house.system_sensors]
+    assert descriptions == [
+        "og_hkv_vl",
+        "dg_hkv_vl",
+        "eg_hkv_vl",
+        "ISG_TEMPERATURE_DHW_ACTUAL_522",
+    ]
+    assert _room(house, 1).system_sensors == ()
+
+
 def test_humidity_sensor(house: House) -> None:
     kinds = {s.connection for s in _room(house, 16).sensors}
     assert SensorConnection.ONEWIRE_HUMIDITY in kinds
