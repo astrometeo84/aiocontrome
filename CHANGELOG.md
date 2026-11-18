@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-18
+
 ### Added
 
 - Room and sensor classification: `Room.is_controlled` (room has a room temperature sensor),
@@ -40,5 +42,6 @@ system; the write endpoints `set_setpoint`, `set_target`, `set_room_offset` and
 - Error hierarchy based on `ContromeError` (`ContromeConnectionError`, `ContromeAuthError`,
   `ContromeNotFoundError`, `ContromeResponseError`, `ContromeApiDisabledError`).
 
-[Unreleased]: https://github.com/astrometeo84/aiocontrome/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/astrometeo84/aiocontrome/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/astrometeo84/aiocontrome/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/astrometeo84/aiocontrome/releases/tag/v0.1.0
