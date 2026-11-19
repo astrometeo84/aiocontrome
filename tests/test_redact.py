@@ -127,6 +127,13 @@ def test_sensitive_keys_case_insensitive_and_nested() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "key", ["Authorization", "COOKIE", "sessionid", "CsrfToken", "csrfmiddlewaretoken"]
+)
+def test_http_secret_keys_are_redacted(key: str) -> None:
+    assert redact({key: "value", "other": "kept"}) == {key: REDACTED, "other": "kept"}
+
+
 def test_custom_keys_replace_defaults() -> None:
     data = {"password": "x", "seriennummer": "123"}
     assert redact(data, keys={"seriennummer"}) == {"password": "x", "seriennummer": REDACTED}

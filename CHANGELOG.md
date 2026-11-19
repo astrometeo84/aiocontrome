@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- Error messages no longer leak credentials in other forms: the password is removed raw,
+  HTML-escaped and URL-encoded, the Basic Auth token with and without `Basic `, and the
+  username as a whole word. All are replaced by `**REDACTED**` (previously `***`).
+- The body excerpt in the "Invalid JSON" error is redacted as well.
+- `redact()` also redacts the keys `authorization`, `cookie`, `sessionid`, `csrftoken` and
+  `csrfmiddlewaretoken` (case-insensitive).
+
 ## [0.2.0] - 2026-11-18
 
 ### Added

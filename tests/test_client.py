@@ -9,7 +9,16 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 import pytest
-from conftest import FakeControme, api_path, load_fixture
+from conftest import (
+    TEST_PASSWORD,
+    TEST_PASSWORD_SPECIAL,
+    TEST_USER,
+    FakeControme,
+    api_path,
+    assert_no_secrets,
+    echo_page,
+    load_fixture,
+)
 
 from aiocontrome import (
     ContromeAuthError,
@@ -24,7 +33,7 @@ from aiocontrome.client import MAX_HOUSE_ID, _base_url, basic_auth_header
 from aiocontrome.errors import MAX_BODY_EXCERPT
 
 BERLIN = ZoneInfo("Europe/Berlin")
-BASIC_U_P = "Basic " + base64.b64encode(b"u:p").decode()
+BASIC_TEST = "Basic " + base64.b64encode(f"{TEST_USER}:{TEST_PASSWORD}".encode()).decode()
 
 
 @pytest.fixture
@@ -36,7 +45,12 @@ async def session() -> AsyncIterator[aiohttp.ClientSession]:
 @pytest.fixture
 def client(session: aiohttp.ClientSession, controme_server: FakeControme) -> ContromeClient:
     return ContromeClient(
-        session, controme_server.host, timezone=BERLIN, house_id=1, username="u", password="p"
+        session,
+        controme_server.host,
+        timezone=BERLIN,
+        house_id=1,
+        username=TEST_USER,
+        password=TEST_PASSWORD,
     )
 
 
@@ -74,7 +88,7 @@ def test_empty_host() -> None:
 
 
 def test_basic_auth_header() -> None:
-    assert basic_auth_header("u", "p") == BASIC_U_P
+    assert basic_auth_header(TEST_USER, TEST_PASSWORD) == BASIC_TEST
     # Passwords may contain ':' and non-ASCII characters (encoded as UTF-8).
     expected = "Basic " + base64.b64encode("u:pä:ss".encode()).decode()
     assert basic_auth_header("u", "pä:ss") == expected
@@ -145,14 +159,14 @@ async def test_get_room_details_uses_basic_auth(
     rooms = await client.get_room_details()
     assert next(r for r in rooms if r.id == 23).window_open is True
     (request,) = controme_server.requests_to(api_path("room_details"))
-    assert request.authorization == BASIC_U_P
+    assert request.authorization == BASIC_TEST
 
 
 async def test_get_room_details_without_credentials(
     session: aiohttp.ClientSession, controme_server: FakeControme
 ) -> None:
     client = ContromeClient(
-        session, controme_server.host, timezone=BERLIN, house_id=1, username="u"
+        session, controme_server.host, timezone=BERLIN, house_id=1, username=TEST_USER
     )
     with pytest.raises(ContromeAuthError, match="username and password"):
         await client.get_room_details()
@@ -218,7 +232,7 @@ async def test_get_raw_room_details_uses_basic_auth(
     controme_server.add_fixture(api_path("room_details"), "room_details_morning.json")
     assert await client.get_raw("room_details") == load_fixture("room_details_morning.json")
     (request,) = controme_server.requests_to(api_path("room_details"))
-    assert request.authorization == BASIC_U_P
+    assert request.authorization == BASIC_TEST
 
 
 async def test_get_raw_room_details_without_credentials(
@@ -400,3 +414,98 @@ async def test_detect_house_id_propagates_connection_errors(
     client = ContromeClient(session, unused_host, timezone=BERLIN)
     with pytest.raises(ContromeConnectionError):
         await client.detect_house_id()
+
+
+# --- credentials never leak into errors or logs ------------------------------------------
+
+
+def _client_with(
+    session: aiohttp.ClientSession, server: FakeControme, password: str, house_id: int | None = 1
+) -> ContromeClient:
+    return ContromeClient(
+        session,
+        server.host,
+        timezone=BERLIN,
+        house_id=house_id,
+        username=TEST_USER,
+        password=password,
+    )
+
+
+@pytest.mark.parametrize("password", [TEST_PASSWORD, TEST_PASSWORD_SPECIAL])
+@pytest.mark.parametrize(
+    ("status", "error"), [(401, ContromeAuthError), (500, ContromeResponseError)]
+)
+async def test_basic_auth_error_body_is_redacted(
+    session: aiohttp.ClientSession,
+    controme_server: FakeControme,
+    caplog: pytest.LogCaptureFixture,
+    password: str,
+    status: int,
+    error: type[ContromeResponseError],
+) -> None:
+    client = _client_with(session, controme_server, password)
+    controme_server.add(
+        api_path("room_details"), status=status, body=echo_page(TEST_USER, password)
+    )
+    caplog.set_level("DEBUG", logger="aiocontrome")
+    with pytest.raises(error) as exc:
+        await client.get_room_details()
+    assert exc.value.status == status
+    assert "**REDACTED**" in str(exc.value)
+    assert_no_secrets(str(exc.value), TEST_USER, password)
+    assert_no_secrets(caplog.text, TEST_USER, password)
+
+
+@pytest.mark.parametrize("password", [TEST_PASSWORD, TEST_PASSWORD_SPECIAL])
+async def test_invalid_json_excerpt_is_redacted(
+    session: aiohttp.ClientSession,
+    controme_server: FakeControme,
+    caplog: pytest.LogCaptureFixture,
+    password: str,
+) -> None:
+    client = _client_with(session, controme_server, password)
+    controme_server.add_broken_json(api_path("room_details"), echo_page(TEST_USER, password))
+    caplog.set_level("DEBUG", logger="aiocontrome")
+    with pytest.raises(ContromeResponseError, match="Invalid JSON") as exc:
+        await client.get_room_details()
+    assert "**REDACTED**" in str(exc.value)
+    assert_no_secrets(str(exc.value), TEST_USER, password)
+    assert_no_secrets(caplog.text, TEST_USER, password)
+
+
+@pytest.mark.parametrize("password", [TEST_PASSWORD, TEST_PASSWORD_SPECIAL])
+async def test_detect_house_id_log_is_redacted(
+    session: aiohttp.ClientSession,
+    controme_server: FakeControme,
+    caplog: pytest.LogCaptureFixture,
+    password: str,
+) -> None:
+    client = _client_with(session, controme_server, password, house_id=None)
+    controme_server.add(api_path("temps", 1), status=500, body=echo_page(TEST_USER, password))
+    controme_server.add_fixture(api_path("temps", 2), "temps.json")
+    caplog.set_level("DEBUG", logger="aiocontrome")
+    assert await client.detect_house_id() == 2
+    assert "House 1 not usable" in caplog.text
+    assert "**REDACTED**" in caplog.text
+    assert_no_secrets(caplog.text, TEST_USER, password)
+
+
+def test_redact_short_username_keeps_words(session: aiohttp.ClientSession) -> None:
+    client = ContromeClient(
+        session, "controme.test", timezone=BERLIN, username="u", password=TEST_PASSWORD
+    )
+    assert client._redact("user u menu u-1 (u)") == (
+        "user **REDACTED** menu **REDACTED**-1 (**REDACTED**)"
+    )
+
+
+def test_redact_replaces_whole_basic_header(session: aiohttp.ClientSession) -> None:
+    client = _client_with(session, FakeControme(host="controme.test"), TEST_PASSWORD)
+    assert client._redact(f"Authorization: {BASIC_TEST}") == "Authorization: **REDACTED**"
+
+
+def test_redact_empty_password(session: aiohttp.ClientSession) -> None:
+    client = ContromeClient(session, "controme.test", timezone=BERLIN, username="", password="")
+    token = base64.b64encode(b":").decode()
+    assert client._redact(f"Basic {token} password= user") == "**REDACTED** password= user"

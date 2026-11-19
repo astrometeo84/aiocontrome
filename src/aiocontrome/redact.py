@@ -16,7 +16,22 @@ from .sensors import detect_connection
 REDACTED = "**REDACTED**"
 
 SENSITIVE_KEYS: frozenset[str] = frozenset(
-    {"password", "passwort", "user", "username", "benutzer", "host", "ip", "mac", "token"}
+    {
+        "password",
+        "passwort",
+        "user",
+        "username",
+        "benutzer",
+        "host",
+        "ip",
+        "mac",
+        "token",
+        "authorization",
+        "cookie",
+        "sessionid",
+        "csrftoken",
+        "csrfmiddlewaretoken",
+    }
 )
 """Keys (case-insensitive) whose values are replaced by ``REDACTED``."""
 

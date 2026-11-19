@@ -7,18 +7,62 @@ serves the recorded fixtures. Never point tests at a real Controme system.
 from __future__ import annotations
 
 import asyncio
+import base64
+import html
 import json
+import re
 import socket
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, quote_plus
 
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+# Obviously fake credentials, so a search for them in errors and logs is unambiguous.
+TEST_USER = "user-test"
+TEST_PASSWORD = "pw-test-SECRET"
+TEST_PASSWORD_SPECIAL = "pw&test+SECRET%"
+"""Changes under HTML escaping and URL encoding."""
+
+
+def secret_forms(username: str, password: str) -> list[str]:
+    """Every form of the credentials that must never appear in errors or logs.
+
+    The username is left out: it is redacted only as a whole word, so test it separately.
+    """
+    token = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
+    return [
+        password,
+        html.escape(password),
+        quote(password),
+        quote_plus(password),
+        token,
+        f"Basic {token}",
+    ]
+
+
+def echo_page(username: str, password: str) -> str:
+    """An error page echoing the credentials in every form, like a Django debug page."""
+    return (
+        "<html><body><h1>Server Error</h1><pre>"
+        f"user={username} password={password} "
+        f"html={html.escape(password)} quote={quote(password)} plus={quote_plus(password)} "
+        f"HTTP_AUTHORIZATION: {secret_forms(username, password)[-1]}"
+        "</pre></body></html>"
+    )
+
+
+def assert_no_secrets(text: str, username: str, password: str) -> None:
+    """Assert that ``text`` contains neither the password (in any form) nor the token."""
+    for form in secret_forms(username, password):
+        assert form not in text, f"{form!r} leaked"
+    assert re.search(rf"(?<!\w){re.escape(username)}(?!\w)", text) is None, "username leaked"
 
 
 def load_fixture(name: str) -> Any:
