@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-19
+
+### Added
+
+- Room and sensor classification: `Room.is_controlled` (room has a room temperature sensor),
+  `Room.return_sensors` (all other sensors except 1-Wire humidity; matches `rltemps/`),
+  `Room.system_sensors` and `House.system_sensors` (sensors of rooms without control).
+
 ### Security
 
 - Error messages no longer leak credentials in other forms: the password is removed raw,
@@ -15,14 +23,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The body excerpt in the "Invalid JSON" error is redacted as well.
 - `redact()` also redacts the keys `authorization`, `cookie`, `sessionid`, `csrftoken` and
   `csrfmiddlewaretoken` (case-insensitive).
-
-## [0.2.0] - 2026-11-18
-
-### Added
-
-- Room and sensor classification: `Room.is_controlled` (room has a room temperature sensor),
-  `Room.return_sensors` (all other sensors except 1-Wire humidity; matches `rltemps/`),
-  `Room.system_sensors` and `House.system_sensors` (sensors of rooms without control).
 
 ## [0.1.0] - 2026-11-17
 
