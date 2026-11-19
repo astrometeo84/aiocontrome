@@ -59,3 +59,8 @@ uv run mypy src
 - Unklarheiten zur API: erst Fixtures und Skill prüfen, dann den Nutzer fragen – nicht raten.
 - Schreib-Endpunkte (`set/json/v1/…`): Parameter aus der offiziellen Doku, Tests nur gegen den lokalen Testserver.
   Live-Tests macht ausschließlich der Nutzer.
+- Vor jedem Push die Subagents `test-manager` und – bei Bezug zu Endpunkten, Parsern, Modellen,
+  Schreibaufrufen oder Unique IDs – `api-expert` aufrufen. Befunde unter BLOCKIERT beheben,
+  die Berichte im PR-Text kurz zusammenfassen.
+- Gegenproben (läuft der Test ohne den Fix rot?) mit `git stash` oder `git worktree`,
+  nie mit `git checkout --` oder `git restore`.
