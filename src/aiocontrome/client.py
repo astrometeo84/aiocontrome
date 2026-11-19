@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import json
 import logging
 import math
@@ -10,6 +11,7 @@ import re
 from collections.abc import Mapping
 from datetime import tzinfo
 from typing import Any, Final, Literal
+from urllib.parse import quote, quote_plus
 
 import aiohttp
 
@@ -43,6 +45,7 @@ from .parsers import (
     parse_temps,
     parse_upcoming_offsets,
 )
+from .redact import REDACTED
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,14 +94,17 @@ class ContromeClient:
         self._base_url = _base_url(host)
         self._tz = timezone
         self._house_id = house_id
-        self._credentials = (
-            (username, password) if username is not None and password is not None else None
-        )
-        self._auth_header = (
-            {"Authorization": basic_auth_header(username, password)}
-            if username is not None and password is not None
-            else None
-        )
+        self._credentials: tuple[str, str] | None = None
+        self._auth_header: dict[str, str] | None = None
+        self._secrets: tuple[str, ...] = ()
+        self._username_pattern: re.Pattern[str] | None = None
+        if username is not None and password is not None:
+            self._credentials = (username, password)
+            header = basic_auth_header(username, password)
+            self._auth_header = {"Authorization": header}
+            self._secrets = _secret_forms(password, header)
+            if username:
+                self._username_pattern = re.compile(rf"(?<!\w){re.escape(username)}(?!\w)")
         self._timeout = aiohttp.ClientTimeout(total=request_timeout)
         self.output_detector = OutputTypeDetector(output_types)
 
@@ -293,7 +299,7 @@ class ContromeClient:
             return json.loads(text)
         except ValueError as err:
             raise ContromeResponseError(
-                f"Invalid JSON from {url}: {body_excerpt(text)}", status=200
+                f"Invalid JSON from {url}: {body_excerpt(self._redact(text))}", status=200
             ) from err
 
     async def _post(self, endpoint: str, fields: Mapping[str, str]) -> None:
@@ -331,10 +337,25 @@ class ContromeClient:
             raise ContromeConnectionError(f"Error requesting {url}: {message}") from err
 
     def _redact(self, text: str) -> str:
-        """Remove the password from text (e.g. a Django debug page echoing POST data)."""
-        if self._credentials is not None and self._credentials[1]:
-            return text.replace(self._credentials[1], "***")
+        """Remove credentials from text (e.g. a Django debug page echoing POST data or headers).
+
+        Replaces the password (raw, HTML-escaped and URL-encoded), the Basic Auth token (with
+        and without ``Basic ``) and the username as a whole word with ``REDACTED``.
+        """
+        for secret in self._secrets:
+            text = text.replace(secret, REDACTED)
+        if self._username_pattern is not None:
+            text = self._username_pattern.sub(REDACTED, text)
         return text
+
+
+def _secret_forms(password: str, auth_header: str) -> tuple[str, ...]:
+    """Forms in which the credentials may be echoed in a response, longest first."""
+    token = auth_header.removeprefix("Basic ")
+    forms = {auth_header, token}
+    if password:
+        forms |= {password, html.escape(password), quote(password), quote_plus(password)}
+    return tuple(sorted(forms, key=len, reverse=True))
 
 
 def _id(value: int, name: str) -> int:

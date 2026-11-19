@@ -46,10 +46,10 @@ await client.set_operating_mode(OperatingMode.OFF, room_id=3)
 await client.set_room_offset(3, -1.0, name="my_integration")  # expires after 10 min
 ```
 
-Write calls send the credentials as form fields over plain HTTP (the Mini-Server has no TLS):
-use them only in the local network. Values are **not range-checked** – the API documents no
-limits, so plausibility checks are up to the caller. `set_house_offset` is not documented in
-detail; its fields are assumed to match `set_room_offset`.
+Write calls send the credentials in plain text (see [Security](#security)). Values are
+**not range-checked** – the API documents no limits, so plausibility checks are up to the
+caller. `set_house_offset` is not documented in detail; its fields are assumed to match
+`set_room_offset`.
 
 An offset of `0` removes it. API offsets are only visible in `get_room_details()` →
 `offsets["api"]`; the `roomoffsets/` endpoint does not list them.
@@ -72,5 +72,12 @@ return the payload as a read-only mapping, because its shape is not known yet.
 
 Errors derive from `ContromeError` (`ContromeConnectionError`, `ContromeAuthError`,
 `ContromeNotFoundError`, `ContromeResponseError`, …).
+
+## Security
+
+The Mini-Server speaks **plain HTTP only** (no TLS). Credentials travel unencrypted: as HTTP
+Basic Auth for `get_room_details()` (and `get_raw("room_details")`) and as form fields for every
+`set_…` call. Use the client only in the local network. The library keeps the credentials out
+of log records and exception messages; error bodies that echo them are redacted.
 
 Not affiliated with Controme GmbH. License: GPL-3.0.

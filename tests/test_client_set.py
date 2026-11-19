@@ -8,7 +8,16 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 import pytest
-from conftest import FakeControme, api_path, set_path
+from conftest import (
+    TEST_PASSWORD,
+    TEST_PASSWORD_SPECIAL,
+    TEST_USER,
+    FakeControme,
+    api_path,
+    assert_no_secrets,
+    echo_page,
+    set_path,
+)
 
 from aiocontrome import (
     DEFAULT_DURATION,
@@ -20,8 +29,8 @@ from aiocontrome import (
 )
 
 BERLIN = ZoneInfo("Europe/Berlin")
-PASSWORD = "s3cret-pw"
-CREDENTIALS = {"user": "u", "password": PASSWORD}
+PASSWORD = TEST_PASSWORD
+CREDENTIALS = {"user": TEST_USER, "password": PASSWORD}
 
 
 @pytest.fixture
@@ -37,7 +46,7 @@ def client(session: aiohttp.ClientSession, controme_server: FakeControme) -> Con
         controme_server.host,
         timezone=BERLIN,
         house_id=1,
-        username="u",
+        username=TEST_USER,
         password=PASSWORD,
     )
 
@@ -149,7 +158,7 @@ async def test_house_id_is_detected_before_writing(
     session: aiohttp.ClientSession, controme_server: FakeControme
 ) -> None:
     client = ContromeClient(
-        session, controme_server.host, timezone=BERLIN, username="u", password=PASSWORD
+        session, controme_server.host, timezone=BERLIN, username=TEST_USER, password=PASSWORD
     )
     controme_server.add(api_path("temps", 1), [])
     controme_server.add_fixture(api_path("temps", 2), "temps.json")
@@ -227,13 +236,13 @@ async def test_password_never_in_errors_or_logs(
     controme_server.add(
         set_path("soll/3"),
         status=500,
-        body=f"<html>POST: user=u password={PASSWORD} soll=21</html>",
+        body=f"<html>POST: user={TEST_USER} password={PASSWORD} soll=21</html>",
     )
     caplog.set_level("DEBUG", logger="aiocontrome")
     with pytest.raises(ContromeResponseError) as exc:
         await client.set_setpoint(3, 21)
     assert PASSWORD not in str(exc.value)
-    assert "password=***" in str(exc.value)
+    assert "user=**REDACTED** password=**REDACTED** soll=21" in str(exc.value)
     assert PASSWORD not in caplog.text
 
 
@@ -245,7 +254,7 @@ async def test_timeout_on_write(
         controme_server.host,
         timezone=BERLIN,
         house_id=1,
-        username="u",
+        username=TEST_USER,
         password=PASSWORD,
         request_timeout=0.05,
     )
@@ -259,7 +268,7 @@ async def test_connection_error_is_redacted(
     session: aiohttp.ClientSession, unused_host: str
 ) -> None:
     client = ContromeClient(
-        session, unused_host, timezone=BERLIN, house_id=1, username="u", password=PASSWORD
+        session, unused_host, timezone=BERLIN, house_id=1, username=TEST_USER, password=PASSWORD
     )
     with pytest.raises(ContromeConnectionError) as exc:
         await client.set_setpoint(3, 21)
@@ -300,3 +309,28 @@ async def test_recorded_403_has_empty_body(
         await client.set_setpoint(23, 19)
     assert str(exc.value) == "HTTP 403"
     assert exc.value.status == 403
+
+
+@pytest.mark.parametrize("password", [TEST_PASSWORD, TEST_PASSWORD_SPECIAL])
+async def test_django_debug_page_on_write_is_redacted(
+    session: aiohttp.ClientSession,
+    controme_server: FakeControme,
+    caplog: pytest.LogCaptureFixture,
+    password: str,
+) -> None:
+    # Django debug pages HTML-escape the echoed POST data (& -> &amp;).
+    client = ContromeClient(
+        session,
+        controme_server.host,
+        timezone=BERLIN,
+        house_id=1,
+        username=TEST_USER,
+        password=password,
+    )
+    controme_server.add(set_path("soll/3"), status=500, body=echo_page(TEST_USER, password))
+    caplog.set_level("DEBUG", logger="aiocontrome")
+    with pytest.raises(ContromeResponseError) as exc:
+        await client.set_setpoint(3, 21)
+    assert (controme_server.requests[-1].form["password"]) == password  # sent unchanged
+    assert_no_secrets(str(exc.value), TEST_USER, password)
+    assert_no_secrets(caplog.text, TEST_USER, password)
