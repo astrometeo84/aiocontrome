@@ -14,7 +14,7 @@ Wird genutzt von der HA-Integration `ha-controme-insights` und soll auch für an
    und gemocktes HTTP über einen lokalen aiohttp-Testserver auf 127.0.0.1 (Fixture
    `controme_server` in `tests/conftest.py`) statt `aioresponses`. Fehlen Daten, den Nutzer
    bitten, sie zu besorgen.
-2. **Keine Zugangsdaten** anlegen, erfragen oder speichern. Keine `.env` mit Passwörtern.
+2. **Keine Zugangsdaten** anlegen, erfragen oder speichern. Keine `.env` mit Passwörtern. Details: Skill `security-secrets`.
 3. **Keine echten Kennungen ins Repo**: Raum-/Personennamen, MACs, Fühler-IDs, IPs nur pseudonymisiert
    (siehe Skill `controme-api`, Abschnitt Pseudonymization).
 4. **GitHub:** nur auf Feature-Branches arbeiten (`feat/…`, `fix/…`, `chore/…`), Pushes nur nach
