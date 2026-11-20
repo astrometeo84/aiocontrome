@@ -1,7 +1,9 @@
 # Live tests
 
 An optional test suite that runs aiocontrome against a **real** Controme Mini-Server. It guards
-against firmware changes and checks the assumptions recorded in the `controme-api` skill.
+against firmware changes and re-checks some of the observations recorded in the `controme-api`
+skill (not its open assumptions, such as `roomoffsets/` with an active offset or the untested
+write calls).
 
 **Run it only from the maintainer's PC in the local network – never in CI, never in the dev
 container.** The normal test run deselects these tests (`-m "not live"` in `pyproject.toml`),
@@ -19,10 +21,12 @@ All tests use `ContromeClient` with the time zone `Europe/Berlin`.
    - `room_details/` returns data **without credentials** (Basic Auth is not checked).
      Until aiocontrome 0.3.0 the client refuses `room_details` without credentials, so this
      request is a plain GET without auth; it will use `get_room_details()` from 0.3.0 on.
-   - `temps/` with house ID 99 returns the same room IDs as the configured house.
+   - `temps/` with house ID 99 returns the same room IDs as house 1. Observed on a one-house
+     system; skipped when `CONTROME_HOUSE` is not 1 (multi-house behaviour is unknown).
 3. **Credential check** (only with username and password): `set_room_offset(99999, 0)` –
-   room 99999 does not exist, offset 0 means "remove". Right credentials → 404, the same user
-   with a random wrong password → 403.
+   room 99999 does not exist, offset 0 means "remove". Right credentials → 404 with an empty
+   body (an unknown route would answer 404 with the Django debug page), the same user with a
+   random wrong password → 403. One failed login per run; no lockout has been observed so far.
 
 ## What the tests touch
 
@@ -33,8 +37,14 @@ other write call is made, nothing is changed on purpose.
 ## What the tests print
 
 Only numbers, status codes, key names and counts. Never room or person names, sensor IDs,
-MACs, the address or credentials, and no raw data. No files are written. Failures are
-reported without traceback, because aiocontrome's exception texts contain the request URL.
+MACs, the address or credentials, and no raw data. Failures are reported without exception
+text, because aiocontrome's exception texts contain the request URL. When `CONTROME_LIVE=1` is
+set, the suite forces short tracebacks without local variables (`--tb=short`, no
+`--showlocals`), and host and credentials are left out of the `repr` of its fixtures.
+Do not add `--log-level=DEBUG`: aiocontrome logs request URLs (with the address) at DEBUG.
+
+The tests write no files of their own. The script disables the coverage data and the pytest
+cache; Python may still write `__pycache__` byte code as in any test run.
 
 ## Running
 
@@ -52,9 +62,11 @@ It sets the environment variables for this run only, starts
 uv run pytest -m live --no-cov -p no:cacheprovider -q --tb=short
 ```
 
-and removes the variables again in a `finally` block. The password never appears in the
-command line or the history; during the run it is visible to the pytest process through its
-environment.
+and restores the previous environment in a `finally` block: `CONTROME_*` variables left over in
+the session are cleared for the run (so an old password or house ID cannot be used by
+accident) and restored afterwards. The script always tests house 1; for another house use a
+manual run. The password never appears in the command line or the history; during the run it
+is visible to the pytest process through its environment.
 
 ### Environment variables (for a manual run)
 
@@ -64,6 +76,12 @@ environment.
 | `CONTROME_HOST` | yes | address of the Mini-Server, e.g. `192.0.2.10` |
 | `CONTROME_HOUSE` | no | house ID, default `1` |
 | `CONTROME_USER`, `CONTROME_PASSWORD` | no | only for the credential check; without them it is skipped |
+
+For a manual run use the same options as the script, so no coverage data or cache is written:
+
+```text
+uv run pytest -m live --no-cov -p no:cacheprovider -q --tb=short
+```
 
 Prefer the script over setting `CONTROME_PASSWORD` by hand, so the password does not end up in
 the shell history.

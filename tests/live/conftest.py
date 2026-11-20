@@ -15,14 +15,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator, Awaitable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import NoReturn
 from zoneinfo import ZoneInfo
 
 import aiohttp
 import pytest
 
-from aiocontrome import ContromeClient, ContromeError
+from aiocontrome import ContromeClient
 
 TZ = ZoneInfo("Europe/Berlin")
 # Wording given by the maintainer (German, with an en dash).
@@ -31,14 +31,25 @@ FIRMWARE_CHANGED = "Firmware-Verhalten geändert – Skill controme-api prüfen"
 
 @dataclass(frozen=True)
 class LiveConfig:
-    host: str
+    """Live configuration. Host and credentials are left out of ``repr``: pytest prints the
+    arguments of failing test functions (``--tb=long``/``auto``), including fixtures."""
+
+    host: str = field(repr=False)
     house_id: int
-    username: str | None
-    password: str | None
+    username: str | None = field(repr=False)
+    password: str | None = field(repr=False)
 
     @property
     def has_credentials(self) -> bool:
         return bool(self.username) and bool(self.password)
+
+
+@dataclass(frozen=True)
+class Credentials:
+    """Username and password for the credential check; never part of ``repr``."""
+
+    username: str = field(repr=False)
+    password: str = field(repr=False)
 
 
 def _read_config() -> LiveConfig | str:
@@ -67,13 +78,19 @@ def live_config() -> LiveConfig:
     return config
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """For live runs, force short tracebacks without locals (no host or password in reports)."""
+    if os.environ.get("CONTROME_LIVE") == "1":
+        config.option.tbstyle = "short"
+        config.option.showlocals = False
+
+
 @pytest.fixture
-def credentials(live_config: LiveConfig) -> tuple[str, str]:
+def credentials(live_config: LiveConfig) -> Credentials:
     """Username and password; skips the test if they are not configured."""
-    if not live_config.has_credentials:
+    if not (live_config.username and live_config.password):
         pytest.skip("credential check skipped: CONTROME_USER/CONTROME_PASSWORD not set")
-    assert live_config.username is not None and live_config.password is not None
-    return live_config.username, live_config.password
+    return Credentials(live_config.username, live_config.password)
 
 
 @pytest.fixture
@@ -108,6 +125,6 @@ async def live_call[T](what: str, call: Awaitable[T]) -> T:
     """Await ``call``; on any error fail with ``what``, the exception type and status only."""
     try:
         return await call
-    except (ContromeError, aiohttp.ClientError, TimeoutError, ValueError) as err:
+    except Exception as err:  # any error, also unexpected ones: report type and status only
         message = f"{what}: {describe(err)}"
     fail(message)  # outside the except block: no exception chain in the report

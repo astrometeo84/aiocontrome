@@ -1,0 +1,2 @@
+# PowerShell scripts keep CRLF line endings on every platform.
+*.ps1 text eol=crlf

@@ -23,7 +23,7 @@ from aiocontrome import (
 )
 from aiocontrome.parsers import parse_room_details
 
-from .conftest import FIRMWARE_CHANGED, TZ, LiveConfig, describe, fail, live_call
+from .conftest import FIRMWARE_CHANGED, TZ, Credentials, LiveConfig, describe, fail, live_call
 
 pytestmark = pytest.mark.live
 
@@ -48,7 +48,7 @@ async def _room_details_without_auth(
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
             status = response.status
             data: Any = await response.json(content_type=None) if status == 200 else None
-    except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+    except Exception as err:  # report type only, never the message (URL)
         message = f"room_details/ without credentials: {describe(err)}"
     if message:
         fail(message)
@@ -56,22 +56,35 @@ async def _room_details_without_auth(
         fail(f"{FIRMWARE_CHANGED}: room_details/ without credentials answered status={status}")
     try:
         return parse_room_details(data, TZ)
-    except ContromeError as err:
+    except Exception as err:  # report type only
         message = f"parse room_details/: {describe(err)}"
     fail(message)
 
 
 async def _expect_error(
-    what: str, call: Awaitable[None], expected: type[ContromeError], status: int
+    what: str,
+    call: Awaitable[None],
+    expected: type[ContromeError],
+    status: int,
+    *,
+    empty_body: bool = False,
 ) -> None:
+    """Expect ``expected`` with ``status``; with ``empty_body`` also an empty response body.
+
+    aiocontrome's message is exactly ``HTTP <status>`` when the body was empty, so this is
+    checked without printing anything from the response.
+    """
     got = "success"
     try:
         await call
     except expected as err:
         if getattr(err, "status", None) == status:
-            return
-        got = describe(err)
-    except (ContromeError, aiohttp.ClientError, TimeoutError) as err:
+            if not empty_body or str(err) == f"HTTP {status}":
+                return
+            got = f"{describe(err)} with a non-empty body (unknown route?)"
+        else:
+            got = describe(err)
+    except Exception as err:  # any other error: type and status only
         got = describe(err)
     # Outside the except blocks: no exception chain (with the URL) in the report.
     fail(f"{what}: expected {expected.__name__} status={status}, got {got}")
@@ -129,12 +142,15 @@ async def test_room_details_without_credentials_returns_data(
 async def test_unknown_house_id_returns_same_rooms(
     live_config: LiveConfig, session: aiohttp.ClientSession, client: ContromeClient
 ) -> None:
+    """Observed on a one-house system with house ID 1 (2026-11-20); multi-house unknown."""
+    if live_config.house_id != 1:
+        pytest.skip("unknown-house guard only covers house 1 (observed on a one-house system)")
     house = await live_call("temps/", client.get_house())
     other = ContromeClient(session, live_config.host, timezone=TZ, house_id=UNKNOWN_HOUSE)
     error = ""
     try:
         unknown = await other.get_house()
-    except (ContromeError, aiohttp.ClientError, TimeoutError) as err:
+    except Exception as err:  # type and status only
         error = describe(err)
     if error:
         fail(f"{FIRMWARE_CHANGED}: temps/ with house {UNKNOWN_HOUSE}: {error}")
@@ -151,15 +167,16 @@ async def test_unknown_house_id_returns_same_rooms(
 
 
 async def test_credential_probe(
-    live_config: LiveConfig, session: aiohttp.ClientSession, credentials: tuple[str, str]
+    live_config: LiveConfig, session: aiohttp.ClientSession, credentials: Credentials
 ) -> None:
     """Check the credentials with ``set_room_offset(99999, 0)``.
 
     Room 99999 does not exist and offset 0 means "remove", so the call presumably has no
     effect (live test 2026-11-20, no before/after comparison). The server checks the
     credentials before the room: right credentials → 404 (empty body), wrong → 403.
+    One failed login per run; no lockout has been observed so far.
     """
-    username, password = credentials
+    username, password = credentials.username, credentials.password
     right = ContromeClient(
         session,
         live_config.host,
@@ -173,6 +190,7 @@ async def test_credential_probe(
         right.set_room_offset(PROBE_ROOM, 0, name="insights_probe"),
         ContromeNotFoundError,
         404,
+        empty_body=True,  # an unknown route would be 404 with the Django debug page
     )
 
     wrong_password = secrets.token_urlsafe(24)
