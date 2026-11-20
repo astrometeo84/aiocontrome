@@ -1,89 +1,50 @@
 """Live tests against a real Controme Mini-Server, opt-in only (see docs/LIVE_TESTS.md).
 
-Read-only, except one credential probe (``set_room_offset`` on a room that does not exist,
-offset 0). Never run in CI or the dev container; ``pytest`` deselects them by default
-(``-m "not live"``) and they skip without ``CONTROME_LIVE=1``/``CONTROME_HOST``.
+Read-only, except one credential probe (``verify_credentials``: a POST to
+``roomoffset/99999/``, a room that does not exist, with offset 0). Never run in CI or the dev
+container; ``pytest`` deselects them by default (``-m "not live"``) and they skip without
+``CONTROME_LIVE=1``/``CONTROME_HOST``.
 """
 
 from __future__ import annotations
 
 import secrets
 from collections.abc import Awaitable
-from typing import Any
 
 import aiohttp
 import pytest
 
-from aiocontrome import (
-    ContromeAuthError,
-    ContromeClient,
-    ContromeError,
-    ContromeNotFoundError,
-    RoomDetails,
-)
-from aiocontrome.parsers import parse_room_details
+from aiocontrome import ContromeAuthError, ContromeClient, ContromeError, RoomDetails
 
 from .conftest import FIRMWARE_CHANGED, TZ, Credentials, LiveConfig, describe, fail, live_call
 
 pytestmark = pytest.mark.live
 
-PROBE_ROOM = 99999
-"""A room ID that does not exist (live test 2026-11-20)."""
 UNKNOWN_HOUSE = 99
 
 
-async def _room_details_without_auth(
-    session: aiohttp.ClientSession, config: LiveConfig, client: ContromeClient
-) -> tuple[RoomDetails, ...]:
-    """``room_details/`` requested without any credentials.
-
-    Until aiocontrome 0.3.0, ``get_room_details()`` and ``get_raw("room_details")`` refuse to
-    run without credentials (client-side ``ContromeAuthError``), so this one request goes
-    through a plain aiohttp GET plus the public parser. Simplify to ``get_room_details()`` on a
-    client without credentials once 0.3.0 no longer sends Basic Auth on reads.
-    """
-    url = f"{client.base_url}/get/json/v1/{config.house_id}/room_details/"
-    message = ""
+async def _room_details_without_auth(client: ContromeClient) -> tuple[RoomDetails, ...]:
+    """``room_details/`` from a client without credentials (it sends no Basic Auth)."""
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-            status = response.status
-            data: Any = await response.json(content_type=None) if status == 200 else None
-    except Exception as err:  # report type only, never the message (URL)
-        message = f"room_details/ without credentials: {describe(err)}"
-    if message:
-        fail(message)
-    if status != 200:
-        fail(f"{FIRMWARE_CHANGED}: room_details/ without credentials answered status={status}")
-    try:
-        return parse_room_details(data, TZ)
-    except Exception as err:  # report type only
-        message = f"parse room_details/: {describe(err)}"
-    fail(message)
+        return await client.get_room_details()
+    except ContromeAuthError as err:  # type and status only, never the message (URL)
+        message = f"{FIRMWARE_CHANGED}: room_details/ without credentials: {describe(err)}"
+    except Exception as err:
+        message = f"room_details/: {describe(err)}"
+    fail(message)  # outside the except blocks: no exception chain in the report
 
 
 async def _expect_error(
-    what: str,
-    call: Awaitable[None],
-    expected: type[ContromeError],
-    status: int,
-    *,
-    empty_body: bool = False,
+    what: str, call: Awaitable[None], expected: type[ContromeError], status: int
 ) -> None:
-    """Expect ``expected`` with ``status``; with ``empty_body`` also an empty response body.
-
-    aiocontrome's message is exactly ``HTTP <status>`` when the body was empty, so this is
-    checked without printing anything from the response.
-    """
+    """Expect ``expected`` with ``status``; report only type and status otherwise."""
     got = "success"
     try:
         await call
     except expected as err:
         if getattr(err, "status", None) == status:
-            if not empty_body or str(err) == f"HTTP {status}":
-                return
-            got = f"{describe(err)} with a non-empty body (unknown route?)"
-        else:
-            got = describe(err)
+            return
+        got = describe(err)
     except Exception as err:  # any other error: type and status only
         got = describe(err)
     # Outside the except blocks: no exception chain (with the URL) in the report.
@@ -93,9 +54,7 @@ async def _expect_error(
 # --- a. read and parse ----------------------------------------------------------------------
 
 
-async def test_read_and_parse_all_endpoints(
-    live_config: LiveConfig, session: aiohttp.ClientSession, client: ContromeClient
-) -> None:
+async def test_read_and_parse_all_endpoints(client: ContromeClient) -> None:
     await live_call("info/", client.get_info())
     house = await live_call("temps/", client.get_house())
     if not house.rooms:
@@ -106,7 +65,7 @@ async def test_read_and_parse_all_endpoints(
     await live_call("vtr/", client.get_vtr())
     await live_call("wetter_pro/", client.get_weather_pro())
 
-    details = await _room_details_without_auth(session, live_config, client)
+    details = await _room_details_without_auth(client)
     temps_ids = {room.id for room in house.rooms}
     details_ids = {room.id for room in details}
     if temps_ids != details_ids:
@@ -131,10 +90,8 @@ async def test_return_sensors_of_first_room(client: ContromeClient) -> None:
 # --- b. guards for the observations of 2026-11-20 -----------------------------------------
 
 
-async def test_room_details_without_credentials_returns_data(
-    live_config: LiveConfig, session: aiohttp.ClientSession, client: ContromeClient
-) -> None:
-    details = await _room_details_without_auth(session, live_config, client)
+async def test_room_details_without_credentials_returns_data(client: ContromeClient) -> None:
+    details = await _room_details_without_auth(client)
     if not details:
         fail(f"{FIRMWARE_CHANGED}: room_details/ without credentials returned 0 rooms")
 
@@ -166,14 +123,15 @@ async def test_unknown_house_id_returns_same_rooms(
 # --- c. credential check via a write call without effect ----------------------------------
 
 
-async def test_credential_probe(
+async def test_verify_credentials(
     live_config: LiveConfig, session: aiohttp.ClientSession, credentials: Credentials
 ) -> None:
-    """Check the credentials with ``set_room_offset(99999, 0)``.
+    """``verify_credentials()``: right credentials pass, a random wrong password → 403.
 
-    Room 99999 does not exist and offset 0 means "remove"; no effect observed (before/after
-    comparison of room_details/ around the run on 2026-11-20). The server checks the
-    credentials before the room: right credentials → 404 (empty body), wrong → 403.
+    The probe is a POST to ``roomoffset/99999/`` (room does not exist, offset 0); no effect
+    observed (before/after comparison of room_details/ around the run on 2026-11-20). A
+    ``ContromeResponseError`` with the right credentials means the server answered something
+    other than 404 with an empty body (e.g. the Django debug page of an unknown route).
     One failed login per run; no lockout has been observed so far.
     """
     username, password = credentials.username, credentials.password
@@ -185,13 +143,7 @@ async def test_credential_probe(
         username=username,
         password=password,
     )
-    await _expect_error(
-        "right credentials",
-        right.set_room_offset(PROBE_ROOM, 0, name="insights_probe"),
-        ContromeNotFoundError,
-        404,
-        empty_body=True,  # an unknown route would be 404 with the Django debug page
-    )
+    await live_call("verify_credentials with right credentials", right.verify_credentials())
 
     wrong_password = secrets.token_urlsafe(24)
     while wrong_password == password:  # pragma: no cover - practically impossible
@@ -205,8 +157,5 @@ async def test_credential_probe(
         password=wrong_password,
     )
     await _expect_error(
-        "wrong password",
-        wrong.set_room_offset(PROBE_ROOM, 0, name="insights_probe"),
-        ContromeAuthError,
-        403,
+        "verify_credentials with wrong password", wrong.verify_credentials(), ContromeAuthError, 403
     )

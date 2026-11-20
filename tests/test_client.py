@@ -152,14 +152,16 @@ async def test_get_return_sensors(client: ContromeClient, controme_server: FakeC
     assert sensor.value == 24.94
 
 
-async def test_get_room_details_uses_basic_auth(
+async def test_get_room_details_sends_no_auth(
     client: ContromeClient, controme_server: FakeControme
 ) -> None:
+    # room_details/ does not check credentials (live test 2026-11-20): even a client with
+    # credentials sends none on reads.
     controme_server.add_fixture(api_path("room_details"), "room_details_window_1_open_10min.json")
     rooms = await client.get_room_details()
     assert next(r for r in rooms if r.id == 23).window_open is True
     (request,) = controme_server.requests_to(api_path("room_details"))
-    assert request.authorization == BASIC_TEST
+    assert request.authorization is None
 
 
 async def test_get_room_details_without_credentials(
@@ -168,9 +170,10 @@ async def test_get_room_details_without_credentials(
     client = ContromeClient(
         session, controme_server.host, timezone=BERLIN, house_id=1, username=TEST_USER
     )
-    with pytest.raises(ContromeAuthError, match="username and password"):
-        await client.get_room_details()
-    assert controme_server.requests == []  # nothing was sent
+    controme_server.add_fixture(api_path("room_details"), "room_details_morning.json")
+    assert len(await client.get_room_details()) > 0
+    (request,) = controme_server.requests
+    assert request.authorization is None
 
 
 async def test_get_upcoming_offsets(client: ContromeClient, controme_server: FakeControme) -> None:
@@ -226,21 +229,18 @@ async def test_get_raw_returns_unparsed_json(
     assert request.authorization is None
 
 
-async def test_get_raw_room_details_uses_basic_auth(
-    client: ContromeClient, controme_server: FakeControme
+@pytest.mark.parametrize("with_credentials", [True, False])
+async def test_get_raw_room_details_sends_no_auth(
+    session: aiohttp.ClientSession, controme_server: FakeControme, with_credentials: bool
 ) -> None:
+    credentials = {"username": TEST_USER, "password": TEST_PASSWORD} if with_credentials else {}
+    client = ContromeClient(
+        session, controme_server.host, timezone=BERLIN, house_id=1, **credentials
+    )
     controme_server.add_fixture(api_path("room_details"), "room_details_morning.json")
     assert await client.get_raw("room_details") == load_fixture("room_details_morning.json")
-    (request,) = controme_server.requests_to(api_path("room_details"))
-    assert request.authorization == BASIC_TEST
-
-
-async def test_get_raw_room_details_without_credentials(
-    auto_client: ContromeClient, controme_server: FakeControme
-) -> None:
-    with pytest.raises(ContromeAuthError, match="room_details requires"):
-        await auto_client.get_raw("room_details")
-    assert controme_server.requests == []
+    (request,) = controme_server.requests
+    assert request.authorization is None
 
 
 async def test_get_raw_returns_error_objects_unchanged(
@@ -310,6 +310,8 @@ async def test_auth_errors(
     with pytest.raises(ContromeAuthError) as exc:
         await client.get_room_details()
     assert exc.value.status == status
+    # Without and then once with Basic Auth (fallback), see test_client_credentials.py.
+    assert [r.authorization for r in controme_server.requests] == [None, BASIC_TEST]
 
 
 async def test_404_debug_page_is_not_logged_in_full(

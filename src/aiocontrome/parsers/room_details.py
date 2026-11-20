@@ -1,4 +1,4 @@
-"""Parser for ``room_details/`` (undocumented, Basic Auth)."""
+"""Parser for ``room_details/`` (undocumented; no credentials needed, live test 2026-11-20)."""
 
 from __future__ import annotations
 
