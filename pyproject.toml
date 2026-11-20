@@ -1,6 +1,6 @@
 [project]
 name = "aiocontrome"
-version = "0.2.0"
+version = "0.3.0"
 description = "Async client for the local HTTP API of Controme Smart-Heat"
 readme = "README.md"
 license = "GPL-3.0-only"
