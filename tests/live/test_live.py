@@ -171,8 +171,8 @@ async def test_credential_probe(
 ) -> None:
     """Check the credentials with ``set_room_offset(99999, 0)``.
 
-    Room 99999 does not exist and offset 0 means "remove", so the call presumably has no
-    effect (live test 2026-11-20, no before/after comparison). The server checks the
+    Room 99999 does not exist and offset 0 means "remove"; no effect observed (before/after
+    comparison of room_details/ around the run on 2026-11-20). The server checks the
     credentials before the room: right credentials → 404 (empty body), wrong → 403.
     One failed login per run; no lockout has been observed so far.
     """

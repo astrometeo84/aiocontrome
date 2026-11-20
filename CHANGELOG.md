@@ -16,6 +16,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one-house system) and checks credentials via `set_room_offset(99999, 0)`.
   Configured only through `CONTROME_*` environment variables; deselected in normal runs and CI
   (`-m "not live"`). Run it with `scripts/run-live-tests.ps1`; see `docs/LIVE_TESTS.md`.
+- `tzdata` in the `dev` extra, so the tests find `Europe/Berlin` on Windows (no IANA database
+  there). Not a runtime dependency: callers pass the time zone themselves.
+
+### Fixed
+
+- `scripts/run-live-tests.ps1` runs `uv run --extra dev pytest`, so the test tools are installed
+  on the first run instead of failing with "Failed to spawn: pytest".
 
 ## [0.2.0] - 2026-11-19
 
