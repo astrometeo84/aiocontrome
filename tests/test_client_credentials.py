@@ -145,6 +145,35 @@ async def test_no_fallback_without_credentials(
     assert [r.authorization for r in controme_server.requests] == [None]
 
 
+async def test_fallback_is_not_remembered(
+    session: aiohttp.ClientSession, controme_server: FakeControme
+) -> None:
+    # Deliberately stateless: every call starts without credentials again.
+    for _ in range(2):
+        controme_server.add_auth_error(ROOM_DETAILS, 403)
+        controme_server.add_fixture(ROOM_DETAILS, "room_details_morning.json")
+    client = _client(session, controme_server)
+    await client.get_room_details()
+    await client.get_room_details()
+    assert [r.authorization for r in controme_server.requests] == [None, BASIC_TEST] * 2
+
+
+async def test_fallback_retry_timeout(
+    session: aiohttp.ClientSession,
+    controme_server: FakeControme,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    controme_server.add_auth_error(ROOM_DETAILS, 401)
+    controme_server.add(ROOM_DETAILS, [], delay=0.5)
+    caplog.set_level("DEBUG", logger="aiocontrome")
+    client = _client(session, controme_server, request_timeout=0.1)
+    with pytest.raises(ContromeConnectionError, match="Timeout") as exc:
+        await client.get_room_details()
+    assert [r.authorization for r in controme_server.requests] == [None, BASIC_TEST]
+    assert_no_secrets(str(exc.value), TEST_USER, TEST_PASSWORD)
+    assert_no_secrets(caplog.text, TEST_USER, TEST_PASSWORD)
+
+
 @READ_METHODS
 async def test_no_fallback_on_404(
     session: aiohttp.ClientSession, controme_server: FakeControme, how: str

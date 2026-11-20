@@ -209,9 +209,10 @@ class ContromeClient:
         Read endpoints do not check credentials (live test 2026-11-20), so this sends a POST
         to ``roomoffset/99999/`` (a room that does not exist) with ``offset=0.00`` and
         ``offset_name=insights_probe``. The server checks the credentials before the room:
-        404 with an empty body means valid, 403 means invalid. Only tested with room 99999;
-        no effect observed (before/after comparison of ``room_details/`` on 2026-11-20). It
-        is still a POST to a write endpoint; do not call it in a polling loop.
+        404 with an empty body means valid, 403 means invalid. Only tested with room 99999 on
+        a one-house system (house ID 1); no effect observed (before/after comparison of
+        ``room_details/`` on 2026-11-20). It is still a POST to a write endpoint; do not call
+        it in a polling loop.
 
         Raises ``ContromeAuthError`` if the credentials are rejected (403) or not configured
         (nothing is sent), ``ContromeResponseError`` for any other answer (e.g. 404 with a
@@ -228,6 +229,8 @@ class ContromeClient:
             headers=None,
             data={"user": username, "password": password, **_PROBE_FIELDS},
         )
+        # A whitespace-only body counts as empty (not observed live; a Django debug page of an
+        # unknown route is never blank).
         if status == 404 and not body.strip():
             return
         if status == 403:

@@ -51,6 +51,9 @@ Write calls send the credentials in plain text (see [Security](#security)). Valu
 caller. `set_house_offset` is not documented in detail; its fields are assumed to match
 `set_room_offset`.
 
+An offset of `0` removes it. API offsets are only visible in `get_room_details()` →
+`offsets["api"]`; the `roomoffsets/` endpoint does not list them.
+
 ### Checking credentials
 
 ```python
@@ -58,14 +61,12 @@ await client.verify_credentials()  # raises ContromeAuthError if they are reject
 ```
 
 Read endpoints do not check credentials, so `verify_credentials()` sends a POST to
-`roomoffset/99999/` (a room that does not exist) with offset `0`: the server checks the
+`roomoffset/99999/` (a room that does not exist) with `offset=0.00`: the server checks the
 credentials before the room and answers 404 (valid) or 403 (invalid). Any other answer raises
-`ContromeResponseError` ("credentials could not be verified"). This was tested only with room
-99999 and showed no effect, but it is still a write call: use it once when setting up, not in
-a polling loop.
-
-An offset of `0` removes it. API offsets are only visible in `get_room_details()` →
-`offsets["api"]`; the `roomoffsets/` endpoint does not list them.
+`ContromeResponseError` ("credentials could not be verified"); `ContromeAuthError` is a
+subclass of it, so catch `ContromeAuthError` first. This was tested only with room 99999 on a
+one-house system and showed no effect, but it is still a write call: use it once when setting
+up, not in a polling loop.
 
 ### Raw data and diagnostics
 
