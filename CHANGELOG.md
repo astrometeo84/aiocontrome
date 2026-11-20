@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-20
+
+Live-verified against a NOVA 27 Mini-Server (one-house system): the live suite passed
+(`get_room_details()` without credentials, `verify_credentials()` 404/403).
+
 ### Added
 
 - Optional live test suite (`tests/live/`, marker `live`) against a real Mini-Server: reads and
@@ -27,11 +32,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- `get_room_details()` and `get_raw("room_details")` send no Basic Auth and need no
-  credentials (`room_details/` does not check them, live test 2026-11-20). If it answers
-  401/403 and credentials are configured, the request is retried once with Basic Auth
-  (fallback for other firmware); a second 401/403 raises `ContromeAuthError`. Previously the
-  client raised `ContromeAuthError` without credentials before sending anything.
+- **No Basic Auth on read calls.** `get_room_details()` and `get_raw("room_details")` send no
+  credentials and need none (`room_details/` does not check them, live test 2026-11-20).
+  Without credentials they **no longer raise `ContromeAuthError`** before sending; they return
+  the data. If `room_details/` answers 401/403 and credentials are configured, the request is
+  retried once with Basic Auth (fallback for other firmware); a second 401/403 raises
+  `ContromeAuthError`, as does a 401/403 without credentials.
 
 ### Fixed
 
@@ -82,6 +88,7 @@ system; the write endpoints `set_setpoint`, `set_target`, `set_room_offset` and
 - Error hierarchy based on `ContromeError` (`ContromeConnectionError`, `ContromeAuthError`,
   `ContromeNotFoundError`, `ContromeResponseError`, `ContromeApiDisabledError`).
 
-[Unreleased]: https://github.com/astrometeo84/aiocontrome/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/astrometeo84/aiocontrome/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/astrometeo84/aiocontrome/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/astrometeo84/aiocontrome/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/astrometeo84/aiocontrome/releases/tag/v0.1.0
