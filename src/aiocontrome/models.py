@@ -307,7 +307,7 @@ class Timer:
 
 @dataclass(frozen=True, slots=True)
 class RoomDetails:
-    """Detailed room state (``room_details/``, requires Basic Auth)."""
+    """Detailed room state (``room_details/``)."""
 
     id: int
     room_key: str

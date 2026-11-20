@@ -60,7 +60,16 @@ type Duration = int | Literal["default"]
 
 _RAW_ENDPOINT = re.compile(r"[a-z_]+(?:/[1-9][0-9]*)?")
 """Endpoint names accepted by ``get_raw``: a name, optionally followed by a numeric ID."""
-_BASIC_AUTH_ENDPOINTS = frozenset({"room_details"})
+_BASIC_AUTH_FALLBACK_ENDPOINTS = frozenset({"room_details"})
+"""Read endpoints retried once with Basic Auth after HTTP 401/403 (fallback for other firmware;
+the live test of 2026-11-20 showed that ``room_details/`` does not check credentials)."""
+
+# Credential probe (live test 2026-11-20): ``roomoffset/99999/`` (room does not exist) with
+# exactly these fields. Right credentials → 404 with an empty body, wrong → 403; the server
+# checks the credentials before the room. No effect observed (before/after comparison of
+# ``room_details/``). Only room 99999 was tested; do not change these values without a new test.
+_PROBE_ROOM = 99999
+_PROBE_FIELDS: Final[Mapping[str, str]] = {"offset": "0.00", "offset_name": "insights_probe"}
 
 _ERROR_BODY_READ_LIMIT = 1024
 """Bytes read from error responses (404 pages are ~240 kB; only an excerpt is kept)."""
@@ -70,8 +79,10 @@ class ContromeClient:
     """Client for one Controme Mini-Server.
 
     The caller owns ``session``. ``timezone`` is the local time zone of the Mini-Server; all
-    local timestamps are converted with it. ``room_details`` requires ``username`` and
-    ``password`` (HTTP Basic Auth); all other read endpoints need no credentials.
+    local timestamps are converted with it. Read endpoints need no credentials and are sent
+    without them; ``username`` and ``password`` are needed for the ``set_*`` methods and
+    ``verify_credentials``. ``room_details`` is retried once with HTTP Basic Auth if it answers
+    401/403 and credentials are configured (fallback for firmware that checks them).
 
     If ``house_id`` is not given, it is detected on first use (see ``detect_house_id``).
     ``output_types`` configures the output type per floor; unconfigured floors are detected
@@ -142,9 +153,12 @@ class ContromeClient:
         return parse_rltemps(data, self._tz)
 
     async def get_room_details(self) -> tuple[RoomDetails, ...]:
-        """Detailed room state (``room_details/``, Basic Auth)."""
-        self._require_basic_auth("room_details")
-        data = await self._get("room_details", house_id=await self._house(), auth=True)
+        """Detailed room state (``room_details/``).
+
+        Sent without credentials; retried once with Basic Auth after HTTP 401/403 if
+        credentials are configured.
+        """
+        data = await self._get("room_details", house_id=await self._house())
         return parse_room_details(data, self._tz)
 
     async def get_upcoming_offsets(self) -> UpcomingOffsets:
@@ -175,7 +189,8 @@ class ContromeClient:
         """Decoded JSON of a read endpoint, unparsed (e.g. for a diagnostics download).
 
         ``endpoint`` is the path below ``get/json/v1/<house>/``, e.g. ``"temps"``,
-        ``"rltemps/23"`` or ``"room_details"`` (sent with Basic Auth). HTTP and JSON errors
+        ``"rltemps/23"`` or ``"room_details"`` (Basic Auth fallback as in
+        ``get_room_details``). HTTP and JSON errors
         raise as usual, but error objects in the payload (e.g. ``api_disabled``) are returned
         as they are. Use ``aiocontrome.redact`` before sharing the result.
         """
@@ -184,19 +199,50 @@ class ContromeClient:
             raise ValueError(
                 f"Invalid endpoint {endpoint!r}, expected e.g. 'temps' or 'rltemps/23'"
             )
-        auth = name in _BASIC_AUTH_ENDPOINTS
-        if auth:
-            self._require_basic_auth(name)
-        return await self._get(name, house_id=await self._house(), auth=auth)
+        return await self._get(name, house_id=await self._house())
 
-    def _require_basic_auth(self, endpoint: str) -> None:
-        if self._auth_header is None:
-            raise ContromeAuthError(f"{endpoint} requires username and password")
+    # --- credentials ------------------------------------------------------------------------
+
+    async def verify_credentials(self) -> None:
+        """Check username and password against the Mini-Server.
+
+        Read endpoints do not check credentials (live test 2026-11-20), so this sends a POST
+        to ``roomoffset/99999/`` (a room that does not exist) with ``offset=0.00`` and
+        ``offset_name=insights_probe``. The server checks the credentials before the room:
+        404 with an empty body means valid, 403 means invalid. Only tested with room 99999;
+        no effect observed (before/after comparison of ``room_details/`` on 2026-11-20). It
+        is still a POST to a write endpoint; do not call it in a polling loop.
+
+        Raises ``ContromeAuthError`` if the credentials are rejected (403) or not configured
+        (nothing is sent), ``ContromeResponseError`` for any other answer (e.g. 404 with a
+        Django debug page = unknown route, or 200 = room 99999 exists) and
+        ``ContromeConnectionError`` if the server cannot be reached.
+        """
+        if self._credentials is None:
+            raise ContromeAuthError("verify_credentials requires username and password")
+        username, password = self._credentials
+        url = self._url(f"roomoffset/{_PROBE_ROOM}", await self._house(), kind="set")
+        status, body = await self._send(
+            "POST",
+            url,
+            headers=None,
+            data={"user": username, "password": password, **_PROBE_FIELDS},
+        )
+        if status == 404 and not body.strip():
+            return
+        if status == 403:
+            raise ContromeAuthError("credentials rejected (HTTP 403)", status=status)
+        raise ContromeResponseError("credentials could not be verified", status=status)
 
     # --- house ID ---------------------------------------------------------------------------
 
     async def detect_house_id(self) -> int:
-        """Find the first house ID (1…``MAX_HOUSE_ID``) whose ``temps/`` contains rooms."""
+        """Find the first house ID (1…``MAX_HOUSE_ID``) whose ``temps/`` contains rooms.
+
+        On a one-house system every house ID returns that house's data (live test
+        2026-11-20), so the detection finds 1. The behaviour of multi-house systems is
+        unknown.
+        """
         for house_id in range(1, MAX_HOUSE_ID + 1):
             try:
                 data = await self._get("temps", house_id=house_id)
@@ -290,11 +336,15 @@ class ContromeClient:
         # Trailing slash matters on some endpoints; always send it.
         return f"{self._base_url}/{kind}/json/v1/{house_id}/{endpoint}/"
 
-    async def _get(self, endpoint: str, *, house_id: int, auth: bool = False) -> Any:
+    async def _get(self, endpoint: str, *, house_id: int) -> Any:
         url = self._url(endpoint, house_id)
-        text = await self._request(
-            "GET", url, headers=self._auth_header if auth else None, data=None
-        )
+        try:
+            text = await self._request("GET", url, headers=None, data=None)
+        except ContromeAuthError:
+            if endpoint not in _BASIC_AUTH_FALLBACK_ENDPOINTS or self._auth_header is None:
+                raise
+            _LOGGER.debug("%s rejected without credentials, retrying once with Basic Auth", url)
+            text = await self._request("GET", url, headers=self._auth_header, data=None)
         try:
             return json.loads(text)
         except ValueError as err:
@@ -319,7 +369,25 @@ class ContromeClient:
         headers: Mapping[str, str] | None,
         data: Mapping[str, str] | None,
     ) -> str:
-        """Send a request and return the body; never logs or raises with credentials."""
+        """Send a request and return the body; raise on non-2xx (``error_for_status``)."""
+        status, body = await self._send(method, url, headers=headers, data=data)
+        if not 200 <= status < 300:
+            raise error_for_status(status, body)
+        return body
+
+    async def _send(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str] | None,
+        data: Mapping[str, str] | None,
+    ) -> tuple[int, str]:
+        """Send a request and return status and body; never logs or raises with credentials.
+
+        For non-2xx answers only the first ``_ERROR_BODY_READ_LIMIT`` bytes are read and the
+        body is redacted; a 2xx body is returned in full.
+        """
         try:
             async with self._session.request(
                 method, url, headers=headers, data=data, timeout=self._timeout
@@ -327,9 +395,8 @@ class ContromeClient:
                 _LOGGER.debug("%s %s → %s", method, url, response.status)
                 if not 200 <= response.status < 300:
                     raw = await response.content.read(_ERROR_BODY_READ_LIMIT)
-                    body = self._redact(raw.decode("utf-8", "replace"))
-                    raise error_for_status(response.status, body)
-                return await response.text()
+                    return response.status, self._redact(raw.decode("utf-8", "replace"))
+                return response.status, await response.text()
         except TimeoutError as err:
             raise ContromeConnectionError(f"Timeout requesting {url}") from err
         except aiohttp.ClientError as err:

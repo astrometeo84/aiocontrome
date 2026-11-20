@@ -2,7 +2,7 @@
 
 from importlib.metadata import version
 
-from .client import DEFAULT_DURATION, ContromeClient, Duration
+from .client import DEFAULT_DURATION, ContromeClient, Duration, basic_auth_header
 from .errors import (
     ContromeApiDisabledError,
     ContromeAuthError,
@@ -80,6 +80,7 @@ __all__ = [
     "UpcomingChange",
     "UpcomingOffsets",
     "__version__",
+    "basic_auth_header",
     "detect_connection",
     "is_stale",
     "redact",

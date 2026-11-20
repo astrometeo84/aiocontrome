@@ -18,15 +18,15 @@ All tests use `ContromeClient` with the time zone `Europe/Berlin`.
    parse without error; the house has rooms; the room IDs of `temps/` and `room_details/` match.
 2. **Guards for the observations of 2026-11-20** (a failure reads "Firmware-Verhalten
    geändert – Skill controme-api prüfen"):
-   - `room_details/` returns data **without credentials** (Basic Auth is not checked).
-     Until aiocontrome 0.3.0 the client refuses `room_details` without credentials, so this
-     request is a plain GET without auth; it will use `get_room_details()` from 0.3.0 on.
+   - `room_details/` returns data **without credentials** (Basic Auth is not checked):
+     `get_room_details()` on a client without credentials.
    - `temps/` with house ID 99 returns the same room IDs as house 1. Observed on a one-house
      system; skipped when `CONTROME_HOUSE` is not 1 (multi-house behaviour is unknown).
-3. **Credential check** (only with username and password): `set_room_offset(99999, 0)` –
-   room 99999 does not exist, offset 0 means "remove". Right credentials → 404 with an empty
-   body (an unknown route would answer 404 with the Django debug page), the same user with a
-   random wrong password → 403. One failed login per run; no lockout has been observed so far.
+3. **Credential check** (only with username and password): `verify_credentials()`, a POST to
+   `roomoffset/99999/` (room does not exist, offset 0). Right credentials pass (404 with an
+   empty body; an unknown route would answer 404 with the Django debug page), the same user
+   with a random wrong password → `ContromeAuthError` 403. One failed login per run; no
+   lockout has been observed so far.
 
 ## What the tests touch
 

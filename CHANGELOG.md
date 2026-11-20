@@ -13,11 +13,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parses the read endpoints the client supports (`info/`, `temps/`, `outs/`, `room_details/`,
   `upcomingoffsets/`, `fps/`, `vtr/`, `wetter_pro/`, `rltemps/` for one room), guards the
   observations of 2026-11-20 (`room_details/` without credentials, unknown house ID on a
-  one-house system) and checks credentials via `set_room_offset(99999, 0)`.
+  one-house system) and checks credentials via `verify_credentials()`.
   Configured only through `CONTROME_*` environment variables; deselected in normal runs and CI
   (`-m "not live"`). Run it with `scripts/run-live-tests.ps1`; see `docs/LIVE_TESTS.md`.
+- `ContromeClient.verify_credentials()`: checks username and password with a POST to
+  `roomoffset/99999/` (room does not exist, `offset=0.00`, `offset_name=insights_probe`), the
+  values tested live on 2026-11-20. 404 with an empty body → valid, 403 → `ContromeAuthError`,
+  any other answer → `ContromeResponseError` ("credentials could not be verified"), no request
+  without credentials.
+- `basic_auth_header` is exported from `aiocontrome`.
 - `tzdata` in the `dev` extra, so the tests find `Europe/Berlin` on Windows (no IANA database
   there). Not a runtime dependency: callers pass the time zone themselves.
+
+### Changed
+
+- `get_room_details()` and `get_raw("room_details")` send no Basic Auth and need no
+  credentials (`room_details/` does not check them, live test 2026-11-20). If it answers
+  401/403 and credentials are configured, the request is retried once with Basic Auth
+  (fallback for other firmware); a second 401/403 raises `ContromeAuthError`. Previously the
+  client raised `ContromeAuthError` without credentials before sending anything.
 
 ### Fixed
 

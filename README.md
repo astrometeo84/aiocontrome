@@ -24,7 +24,7 @@ async def main() -> None:
             session,
             "192.0.2.10",  # Mini-Server address
             timezone=ZoneInfo("Europe/Berlin"),  # required: Controme reports local time
-            username="…",  # only needed for get_room_details() and set_… methods
+            username="…",  # only needed for set_… methods and verify_credentials()
             password="…",
         )
         house = await client.get_house()  # house ID is detected on first use
@@ -51,6 +51,19 @@ Write calls send the credentials in plain text (see [Security](#security)). Valu
 caller. `set_house_offset` is not documented in detail; its fields are assumed to match
 `set_room_offset`.
 
+### Checking credentials
+
+```python
+await client.verify_credentials()  # raises ContromeAuthError if they are rejected
+```
+
+Read endpoints do not check credentials, so `verify_credentials()` sends a POST to
+`roomoffset/99999/` (a room that does not exist) with offset `0`: the server checks the
+credentials before the room and answers 404 (valid) or 403 (invalid). Any other answer raises
+`ContromeResponseError` ("credentials could not be verified"). This was tested only with room
+99999 and showed no effect, but it is still a write call: use it once when setting up, not in
+a polling loop.
+
 An offset of `0` removes it. API offsets are only visible in `get_room_details()` →
 `offsets["api"]`; the `roomoffsets/` endpoint does not list them.
 
@@ -60,7 +73,7 @@ An offset of `0` removes it. API offsets are only visible in `get_room_details()
 from aiocontrome import redact
 
 raw = {
-    endpoint: await client.get_raw(endpoint)  # unparsed JSON; room_details uses Basic Auth
+    endpoint: await client.get_raw(endpoint)  # unparsed JSON
     for endpoint in ("info", "temps", "outs", "room_details", "upcomingoffsets", "fps")
 }
 safe = redact(raw)  # sensor IDs/MACs → "**onewire_temperature_1**", IPs → "**REDACTED**"
@@ -75,9 +88,11 @@ Errors derive from `ContromeError` (`ContromeConnectionError`, `ContromeAuthErro
 
 ## Security
 
-The Mini-Server speaks **plain HTTP only** (no TLS). Credentials travel unencrypted: as HTTP
-Basic Auth for `get_room_details()` (and `get_raw("room_details")`) and as form fields for every
-`set_…` call. Use the client only in the local network. The library keeps the credentials out
+The Mini-Server speaks **plain HTTP only** (no TLS). Credentials travel unencrypted as form
+fields of every `set_…` call and of `verify_credentials()`. Read calls send no credentials;
+only if `room_details/` answers 401/403 and credentials are configured is it retried once with
+HTTP Basic Auth (fallback for firmware that checks them; the tested firmware does not). Use the
+client only in the local network. The library keeps the credentials out
 of log records and exception messages; error bodies that echo them are redacted.
 
 Not affiliated with Controme GmbH. License: GPL-3.0.
