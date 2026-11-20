@@ -79,17 +79,23 @@ def live_config() -> LiveConfig:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """For live runs, force short tracebacks without locals (no host or password in reports)."""
+    """For live runs, force short tracebacks without locals (no host or password in reports).
+
+    Overrides ``--tb``, ``--showlocals`` and ``--full-trace`` given on the command line; proven
+    by ``tests/live/test_config.py::test_live_run_report_hides_host_and_password``.
+    """
     if os.environ.get("CONTROME_LIVE") == "1":
         config.option.tbstyle = "short"
         config.option.showlocals = False
+        config.option.fulltrace = False
 
 
 @pytest.fixture
 def credentials(live_config: LiveConfig) -> Credentials:
     """Username and password; skips the test if they are not configured."""
-    if not (live_config.username and live_config.password):
+    if not live_config.has_credentials:
         pytest.skip("credential check skipped: CONTROME_USER/CONTROME_PASSWORD not set")
+    assert live_config.username is not None and live_config.password is not None  # for mypy
     return Credentials(live_config.username, live_config.password)
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from .conftest import Credentials, LiveConfig, _read_config
@@ -58,3 +60,42 @@ def test_config_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     config = _read_config()
     assert isinstance(config, LiveConfig)
     assert config.has_credentials
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        pytest.param(("--tb=long", "--showlocals"), id="tb_long_showlocals"),
+        pytest.param(("--full-trace", "--showlocals"), id="full_trace_showlocals"),
+    ],
+)
+def test_live_run_report_hides_host_and_password(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, options: tuple[str, ...]
+) -> None:
+    # A live run (CONTROME_LIVE=1) with the live conftest; a test raises an unexpected error
+    # while host and password sit in local variables and fixture arguments. Even with
+    # --tb=long/--full-trace and --showlocals, the report must show neither (pytest_configure
+    # forces short tracebacks without locals). Offline: nothing is contacted.
+    pytester.makeconftest((Path(__file__).parent / "conftest.py").read_text(encoding="utf-8"))
+    pytester.makeini(
+        "[pytest]\nasyncio_mode = auto\nasyncio_default_fixture_loop_scope = function\n"
+    )
+    pytester.makepyfile(
+        test_leak=f"""
+        def test_unexpected_error(live_config, credentials):
+            url = "http://{HOST}/get/json/v1/1/room_details/"
+            password = credentials.password
+            raise RuntimeError("boom")
+        """
+    )
+    monkeypatch.setenv("CONTROME_LIVE", "1")
+    monkeypatch.setenv("CONTROME_HOST", HOST)
+    monkeypatch.setenv("CONTROME_USER", "user-test")
+    monkeypatch.setenv("CONTROME_PASSWORD", PASSWORD)
+    result = pytester.runpytest("-p", "no:cacheprovider", *options)
+    result.assert_outcomes(failed=1)
+    output = result.stdout.str() + result.stderr.str()
+    assert "RuntimeError" in output
+    assert HOST not in output
+    assert PASSWORD not in output
+    assert "user-test" not in output
