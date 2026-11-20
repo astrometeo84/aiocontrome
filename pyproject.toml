@@ -20,6 +20,8 @@ dev = [
   "pytest-cov",
   "ruff",
   "mypy",
+  # IANA time zones for the tests on Windows (no system database); not a runtime dependency.
+  "tzdata",
 ]
 
 [project.urls]

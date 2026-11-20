@@ -4,8 +4,9 @@
 
 .DESCRIPTION
     Asks for the address, username and password, sets the CONTROME_* environment variables for
-    this run only, starts "uv run pytest -m live" and restores the previous state afterwards
-    (CONTROME_* variables set before the run are cleared for the run and restored at the end).
+    this run only, starts "uv run --extra dev pytest -m live" and restores the previous state
+    afterwards (CONTROME_* variables set before the run are cleared for the run and restored at
+    the end).
     Credentials are read with Read-Host (not stored in the command line or the history); the
     password is entered as SecureString. Leave the username empty to skip the credential check.
 
@@ -77,7 +78,7 @@ try {
     else {
         Write-Host 'No credentials given: the credential check will be skipped.'
     }
-    & uv run pytest -m live --no-cov -p no:cacheprovider -q --tb=short
+    & uv run --extra dev pytest -m live --no-cov -p no:cacheprovider -q --tb=short
     $exitCode = $LASTEXITCODE
 }
 finally {

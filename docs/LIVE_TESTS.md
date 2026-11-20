@@ -31,8 +31,9 @@ All tests use `ContromeClient` with the time zone `Europe/Berlin`.
 ## What the tests touch
 
 Read endpoints only, plus the one credential probe above. That probe is a POST to a write
-endpoint; it is presumably without effect (no before/after comparison has been made). No
-other write call is made, nothing is changed on purpose.
+endpoint; no effect has been observed (a before/after comparison of `room_details/` around a
+run on 2026-11-20 showed only measurement changes, no change under offsets). No other write
+call is made, nothing is changed on purpose.
 
 ## What the tests print
 
@@ -45,6 +46,13 @@ Do not add `--log-level=DEBUG`: aiocontrome logs request URLs (with the address)
 
 The tests write no files of their own. The script disables the coverage data and the pytest
 cache; Python may still write `__pycache__` byte code as in any test run.
+
+## First run on Windows
+
+The script needs [uv](https://docs.astral.sh/uv/) on the `PATH`; nothing else has to be set up
+by hand, as long as uv finds Python 3.13 or newer or may download it (its default). On the first run `uv run --extra dev` creates the virtual environment and installs the
+test tools from `uv.lock` (including `tzdata`, because Windows has no IANA time zone database
+for `Europe/Berlin`). This takes a while; later runs start right away.
 
 ## Running
 
@@ -59,7 +67,7 @@ The script asks for the address (default: `$env:CONTROME_IP`), the username and 
 It sets the environment variables for this run only, starts
 
 ```text
-uv run pytest -m live --no-cov -p no:cacheprovider -q --tb=short
+uv run --extra dev pytest -m live --no-cov -p no:cacheprovider -q --tb=short
 ```
 
 and restores the previous environment in a `finally` block: `CONTROME_*` variables left over in
@@ -80,7 +88,7 @@ is visible to the pytest process through its environment.
 For a manual run use the same options as the script, so no coverage data or cache is written:
 
 ```text
-uv run pytest -m live --no-cov -p no:cacheprovider -q --tb=short
+uv run --extra dev pytest -m live --no-cov -p no:cacheprovider -q --tb=short
 ```
 
 Prefer the script over setting `CONTROME_PASSWORD` by hand, so the password does not end up in
