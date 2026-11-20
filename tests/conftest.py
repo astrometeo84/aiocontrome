@@ -22,6 +22,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
+# pytester (built into pytest, no network): runs pytest in-process on generated files; used to
+# prove that live-test reports never show host or password (tests/live/test_config.py).
+pytest_plugins = ["pytester"]
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 # Obviously fake credentials, so a search for them in errors and logs is unambiguous.

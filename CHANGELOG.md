@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Optional live test suite (`tests/live/`, marker `live`) against a real Mini-Server: reads and
+  parses the read endpoints the client supports (`info/`, `temps/`, `outs/`, `room_details/`,
+  `upcomingoffsets/`, `fps/`, `vtr/`, `wetter_pro/`, `rltemps/` for one room), guards the
+  observations of 2026-11-20 (`room_details/` without credentials, unknown house ID on a
+  one-house system) and checks credentials via `set_room_offset(99999, 0)`.
+  Configured only through `CONTROME_*` environment variables; deselected in normal runs and CI
+  (`-m "not live"`). Run it with `scripts/run-live-tests.ps1`; see `docs/LIVE_TESTS.md`.
+
 ## [0.2.0] - 2026-11-19
 
 ### Added
