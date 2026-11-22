@@ -611,11 +611,17 @@ def _stage_change(repo: Path) -> None:
     _git(repo, "add", "top.txt")
 
 
+def _stage_then_revert(repo: Path) -> None:
+    _stage_change(repo)
+    _write(repo, "top.txt", "top\n")  # working tree back to HEAD, index still differs
+
+
 @pytest.mark.parametrize(
     ("dirty", "name"),
     [
         pytest.param(lambda r: _write(r, "top.txt", "top changed\n"), "top.txt", id="modified"),
         pytest.param(_stage_change, "top.txt", id="staged"),
+        pytest.param(_stage_then_revert, "top.txt", id="staged-then-reverted"),
         pytest.param(lambda r: _write(r, "docs/new.md", "new\n"), "docs/new.md", id="untracked"),
         pytest.param(lambda r: (r / "docs/a.md").unlink(), "docs/a.md", id="deleted"),
     ],
@@ -653,6 +659,53 @@ def test_error_apply_uncommitted_source_lists_all_files(
     )
 
 
+@pytest.mark.parametrize("untracked", [False, True], ids=["modified", "untracked"])
+def test_error_apply_uncommitted_source_non_ascii_path(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str], untracked: bool
+) -> None:
+    # Without -z git would quote this path and the check would miss it.
+    here, there = repos
+    name = "docs/ä b.md"
+    if not untracked:
+        for repo in (here, there):
+            _write(repo, name, "old\n")
+            _commit(repo)
+    _write(here, name, "new\n")
+    _assert_error(
+        capsys, ["--other", str(there), "--apply"], f"shared files: {name}; commit them first"
+    )
+    assert not untracked or not (there / name).exists()
+
+
+@pytest.mark.parametrize("hide_untracked", [False, True], ids=["default", "showUntrackedFiles=no"])
+def test_error_apply_untracked_source_in_new_folder(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str], hide_untracked: bool
+) -> None:
+    # Without --untracked-files=all git reports only "docs/neu/" (or nothing at all).
+    here, there = repos
+    if hide_untracked:
+        _git(here, "config", "status.showUntrackedFiles", "no")
+    _write(here, "docs/neu/x.md", "new\n")
+    _assert_error(
+        capsys, ["--other", str(there), "--apply"], "shared files: docs/neu/x.md; commit them first"
+    )
+    assert not (there / "docs/neu").exists()
+
+
+def test_error_apply_staged_rename_in_source(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Without --no-renames the -z record is "R  new\0old\0" and "old" would be misparsed.
+    here, there = repos
+    _git(here, "mv", "docs/a.md", "docs/c.md")
+    _assert_error(
+        capsys,
+        ["--other", str(there), "--apply"],
+        "shared files: docs/a.md, docs/c.md; commit them first",
+    )
+    assert not (there / "docs/c.md").exists()
+
+
 def test_apply_ignores_dirty_unshared_source_files(
     repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -661,9 +714,16 @@ def test_apply_ignores_dirty_unshared_source_files(
     _commit(here)
     _write(here, "unshared.txt", "modified\n")
     _write(here, "scratch.txt", "untracked\n")
-    code, out, _ = _run(capsys, "--other", str(there), "--apply")
+    code, out, err = _run(capsys, "--other", str(there), "--apply")
     assert code == 0
-    assert "copied        top.txt" in out
+    assert err == ""
+    assert out == (
+        "same          .claude/shared-files.txt\n"
+        "same          docs/a.md\n"
+        "same          docs/sub/b.md\n"
+        "DIFFERS       top.txt\n"
+        "copied        top.txt\n"
+    )
     assert (there / "top.txt").read_bytes() == b"top changed\n"
 
 
@@ -706,9 +766,11 @@ def test_error_apply_source_file_symlink(
     assert _git(there, "status", "--porcelain") == ""
 
 
-def test_error_apply_source_below_dir_symlink(
+def test_error_apply_source_below_dir_symlink_even_if_not_copied(
     repos: tuple[Path, Path], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    # Deliberately broad (defense in depth): git does not list files below a symlinked
+    # folder, so docs/link/x.md is ONLY THERE and would not be copied; --apply still refuses.
     here, there = repos
     outside = tmp_path / "outside"
     outside.mkdir()

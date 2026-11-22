@@ -199,6 +199,8 @@ def check_apply_source(here: Path, results: list[tuple[str, Status]]) -> None:
     """Refuse ``--apply`` from uncommitted or symlinked shared files of the current repo.
 
     Only the selected shared files are checked; other changes in ``here`` do not matter.
+    Deliberately broader than ``check_copy_targets``: every selected file counts, whatever
+    its status, so a symlink in the source is refused even where nothing would be copied.
     """
     selected = {name for name, _ in results}
     status = _git(here, "status", "--porcelain", "-z", "--no-renames", "--untracked-files=all")

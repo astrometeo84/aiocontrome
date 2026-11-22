@@ -74,8 +74,13 @@ before anything is copied) if
   without committing (only the shared files are checked; other changes here do not matter),
 - a selected shared file in this repository is a symlink or lies below a symlinked folder.
 
-So commit the shared files here first, then sync. The report and `--diff` work on the
-working tree as before and are not affected by these checks.
+Both checks cover every selected shared file, also those that would not be copied. So
+commit the shared files here first, then sync. The report and `--diff` work on the working
+tree as before and are not affected by these checks.
+
+Known limit: the check relies on `git status`. Files marked `--assume-unchanged` or
+`--skip-worktree` look clean even if the working tree differs; do not use these flags on
+shared files.
 
 Files that git lists but that were deleted without committing count as not present.
 Ignored files (`.gitignore`) never count; untracked, not ignored files do.
