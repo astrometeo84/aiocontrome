@@ -11,7 +11,9 @@ Usage::
     uv run python scripts/shared_sync.py --other ../ha-controme-insights --apply   # copy
 
 ``--apply`` copies DIFFERS and MISSING THERE from the current repository into the other
-one. It never deletes, commits or pushes anything.
+one. It never deletes, commits or pushes anything. The source must be a committed state:
+``--apply`` refuses to run if a selected shared file in the current repository is modified,
+staged, untracked or deleted without committing, or is a symlink.
 
 Exit codes: 0 = all shared files are identical (or became identical through ``--apply``),
 1 = differences remain, 2 = usage or precondition error.
@@ -193,6 +195,31 @@ def check_copy_targets(there: Path, results: list[tuple[str, Status]]) -> None:
             raise SyncError(f"refusing to write through a symlink or outside {there}: {name}")
 
 
+def check_apply_source(here: Path, results: list[tuple[str, Status]]) -> None:
+    """Refuse ``--apply`` from uncommitted or symlinked shared files of the current repo.
+
+    Only the selected shared files are checked; other changes in ``here`` do not matter.
+    Deliberately broader than ``check_copy_targets``: every selected file counts, whatever
+    its status, so a symlink in the source is refused even where nothing would be copied.
+    The list of shared files is always checked: it decides the selection, even when no
+    pattern matches the list itself.
+    """
+    selected = {name for name, _ in results} | {str(LIST_FILE)}
+    status = _git(here, "status", "--porcelain", "-z", "--no-renames", "--untracked-files=all")
+    if status.returncode != 0:
+        raise SyncError(f"git status failed in {here}: {status.stderr.strip()}")
+    # Porcelain v1 with -z and --no-renames: one "XY <path>" entry per NUL-terminated record.
+    dirty = sorted({entry[3:] for entry in status.stdout.split("\0") if entry} & selected)
+    if dirty:
+        raise SyncError(
+            f"{here} has uncommitted changes in shared files: {', '.join(dirty)}; commit them first"
+        )
+    for name in sorted(selected):
+        source = here / name
+        if source.is_symlink() or (source.exists() and not source.resolve().is_relative_to(here)):
+            raise SyncError(f"refusing to copy a symlink from {here}: {name}")
+
+
 def apply(here: Path, there: Path, results: list[tuple[str, Status]]) -> None:
     """Copy DIFFERS and MISSING THERE into the other repository; never delete anything."""
     for name, status in results:
@@ -234,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
         results = compare(here, there, patterns)
         if args.apply:
             check_copy_targets(there, results)
+            check_apply_source(here, results)
     except SyncError as err:
         print(f"error: {err}", file=sys.stderr)
         return 2

@@ -152,10 +152,15 @@ def test_unlisted_files_are_ignored(
 def test_differs_exit_1(repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
     here, there = repos
     _write(here, "docs/sub/b.md", "beta changed\n")
-    code, out, _ = _run(capsys, "--other", str(there))
+    code, out, err = _run(capsys, "--other", str(there))
     assert code == 1
-    assert _report(out)["docs/sub/b.md"] == "DIFFERS"
-    assert _report(out)["docs/a.md"] == "same"
+    assert err == ""
+    assert out == (
+        "same          .claude/shared-files.txt\n"
+        "same          docs/a.md\n"
+        "DIFFERS       docs/sub/b.md\n"
+        "same          top.txt\n"
+    )
 
 
 def test_differs_is_byte_exact(
@@ -238,6 +243,50 @@ def test_single_star_does_not_cross_directories(
     code, out, _ = _run(capsys, "--other", str(there))
     assert code == 0
     assert _report(out) == {"docs/a.md": "same"}
+
+
+def test_single_star_matches_dotfiles(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Current behaviour (include_hidden=True): "*" also matches names starting with ".".
+    here, there = repos
+    _write(here, ".claude/shared-files.txt", "docs/*\n")
+    _write(here, "docs/.hidden", "h\n")
+    _, out, _ = _run(capsys, "--other", str(there))
+    assert _report(out) == {"docs/.hidden": "MISSING THERE", "docs/a.md": "same"}
+
+
+def test_question_mark_matches_one_character(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, ".claude/shared-files.txt", "top.tx?\n")
+    _write(here, "top.txtx", "too long\n")
+    _write(here, "top.tx", "too short\n")
+    code, out, _ = _run(capsys, "--other", str(there))
+    assert code == 0
+    assert _report(out) == {"top.txt": "same"}
+
+
+def test_bracket_class_matches_listed_characters(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, ".claude/shared-files.txt", "docs/[ab].md\n")
+    _write(here, "docs/b.md", "b\n")
+    _write(here, "docs/c.md", "c\n")
+    _, out, _ = _run(capsys, "--other", str(there))
+    assert _report(out) == {"docs/a.md": "same", "docs/b.md": "MISSING THERE"}
+
+
+def test_negated_bracket_class(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, ".claude/shared-files.txt", "docs/[!a].md\n")
+    _write(here, "docs/b.md", "b\n")
+    _, out, _ = _run(capsys, "--other", str(there))
+    assert _report(out) == {"docs/b.md": "MISSING THERE"}
 
 
 def test_deleted_uncommitted_counts_as_missing_there(
@@ -555,6 +604,301 @@ def test_error_apply_through_dir_symlink(
     _commit(here)
     _assert_error(capsys, ["--other", str(there), "--apply"], "refusing to write")
     assert list(outside.iterdir()) == []
+
+
+def _stage_change(repo: Path) -> None:
+    _write(repo, "top.txt", "top staged\n")
+    _git(repo, "add", "top.txt")
+
+
+def _stage_then_revert(repo: Path) -> None:
+    _stage_change(repo)
+    _write(repo, "top.txt", "top\n")  # working tree back to HEAD, index still differs
+
+
+@pytest.mark.parametrize(
+    ("dirty", "name"),
+    [
+        pytest.param(lambda r: _write(r, "top.txt", "top changed\n"), "top.txt", id="modified"),
+        pytest.param(_stage_change, "top.txt", id="staged"),
+        pytest.param(_stage_then_revert, "top.txt", id="staged-then-reverted"),
+        pytest.param(lambda r: _write(r, "docs/new.md", "new\n"), "docs/new.md", id="untracked"),
+        pytest.param(lambda r: (r / "docs/a.md").unlink(), "docs/a.md", id="deleted"),
+    ],
+)
+def test_error_apply_uncommitted_source(
+    repos: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+    dirty: Callable[[Path], None],
+    name: str,
+) -> None:
+    here, there = repos
+    _write(here, "docs/sub/b.md", "beta changed\n")  # committed change that would be copied
+    _commit(here)
+    dirty(here)
+    _assert_error(
+        capsys,
+        ["--other", str(there), "--apply"],
+        f"has uncommitted changes in shared files: {name};",
+    )
+    # Nothing copied, the other repository is untouched.
+    assert (there / "docs/sub/b.md").read_bytes() == b"beta\n"
+    assert _git(there, "status", "--porcelain") == ""
+
+
+def test_error_apply_uncommitted_source_lists_all_files(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, "top.txt", "top changed\n")
+    _write(here, "docs/new.md", "new\n")
+    _assert_error(
+        capsys,
+        ["--other", str(there), "--apply"],
+        "shared files: docs/new.md, top.txt; commit them first",
+    )
+
+
+@pytest.mark.parametrize("untracked", [False, True], ids=["modified", "untracked"])
+def test_error_apply_uncommitted_source_non_ascii_path(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str], untracked: bool
+) -> None:
+    # Without -z git would quote this path and the check would miss it.
+    here, there = repos
+    name = "docs/ä b.md"
+    if not untracked:
+        for repo in (here, there):
+            _write(repo, name, "old\n")
+            _commit(repo)
+    _write(here, name, "new\n")
+    _assert_error(
+        capsys, ["--other", str(there), "--apply"], f"shared files: {name}; commit them first"
+    )
+    assert not untracked or not (there / name).exists()
+
+
+@pytest.mark.parametrize("hide_untracked", [False, True], ids=["default", "showUntrackedFiles=no"])
+def test_error_apply_untracked_source_in_new_folder(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str], hide_untracked: bool
+) -> None:
+    # Without --untracked-files=all git reports only "docs/neu/" (or nothing at all).
+    here, there = repos
+    if hide_untracked:
+        _git(here, "config", "status.showUntrackedFiles", "no")
+    _write(here, "docs/neu/x.md", "new\n")
+    _assert_error(
+        capsys, ["--other", str(there), "--apply"], "shared files: docs/neu/x.md; commit them first"
+    )
+    assert not (there / "docs/neu").exists()
+
+
+def test_error_apply_staged_rename_in_source(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Without --no-renames the -z record is "R  new\0old\0" and "old" would be misparsed.
+    here, there = repos
+    _git(here, "mv", "docs/a.md", "docs/c.md")
+    _assert_error(
+        capsys,
+        ["--other", str(there), "--apply"],
+        "shared files: docs/a.md, docs/c.md; commit them first",
+    )
+    assert not (there / "docs/c.md").exists()
+
+
+UNLISTED_LIST = "top.txt\ndocs/**\n"  # does not match .claude/shared-files.txt itself
+
+
+def test_error_apply_uncommitted_list_even_if_not_listed(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, ".claude/shared-files.txt", UNLISTED_LIST)
+    _write(here, "top.txt", "top changed\n")
+    _commit(here)
+    _write(here, ".claude/shared-files.txt", UNLISTED_LIST + "# uncommitted\n")
+    _assert_error(
+        capsys,
+        ["--other", str(there), "--apply"],
+        "shared files: .claude/shared-files.txt; commit them first",
+    )
+    assert (there / "top.txt").read_bytes() == b"top\n"
+
+
+def test_error_apply_symlinked_list_even_if_not_listed(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, "list.txt", UNLISTED_LIST)
+    (here / ".claude/shared-files.txt").unlink()
+    _symlink(here / ".claude/shared-files.txt", here / "list.txt")
+    _write(here, "top.txt", "top changed\n")
+    _commit(here)  # committed, so only the symlink check can refuse
+    assert _git(here, "status", "--porcelain") == ""
+    _assert_error(
+        capsys,
+        ["--other", str(there), "--apply"],
+        f"refusing to copy a symlink from {here}: .claude/shared-files.txt",
+    )
+    assert (there / "top.txt").read_bytes() == b"top\n"
+
+
+def test_apply_with_committed_unlisted_list(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, ".claude/shared-files.txt", UNLISTED_LIST)
+    _write(here, "top.txt", "top changed\n")
+    _commit(here)
+    code, out, _ = _run(capsys, "--other", str(there), "--apply")
+    assert code == 0
+    assert "copied        top.txt" in out
+    assert ".claude/shared-files.txt" not in out
+
+
+def test_apply_ignores_dirty_unshared_source_files(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, "top.txt", "top changed\n")
+    _commit(here)
+    _write(here, "unshared.txt", "modified\n")
+    _write(here, "scratch.txt", "untracked\n")
+    code, out, err = _run(capsys, "--other", str(there), "--apply")
+    assert code == 0
+    assert err == ""
+    assert out == (
+        "same          .claude/shared-files.txt\n"
+        "same          docs/a.md\n"
+        "same          docs/sub/b.md\n"
+        "DIFFERS       top.txt\n"
+        "copied        top.txt\n"
+    )
+    assert (there / "top.txt").read_bytes() == b"top changed\n"
+
+
+def test_report_and_diff_are_fine_with_dirty_source(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, "top.txt", "top changed\n")
+    _write(here, "docs/new.md", "new\n")
+    code, out, err = _run(capsys, "--other", str(there), "--diff")
+    assert code == 1
+    assert err == ""
+    assert "\n+top changed\n" in out
+    assert _report(out)["docs/new.md"] == "MISSING THERE"
+    assert _run(capsys, "--other", str(there))[0] == 1
+
+
+@pytest.mark.parametrize("inside", [True, False], ids=["target-inside", "target-outside"])
+def test_error_apply_source_file_symlink(
+    repos: tuple[Path, Path], tmp_path: Path, capsys: pytest.CaptureFixture[str], inside: bool
+) -> None:
+    here, there = repos
+    if inside:
+        target = here / "unshared.txt"
+    else:
+        target = tmp_path / "outside.txt"
+        target.write_text("outside\n", encoding="utf-8")
+    original = target.read_bytes()
+    (here / "top.txt").unlink()
+    _symlink(here / "top.txt", target)
+    _commit(here)  # committed, so only the symlink check can refuse
+    assert _git(here, "status", "--porcelain") == ""
+    _assert_error(
+        capsys,
+        ["--other", str(there), "--apply"],
+        f"refusing to copy a symlink from {here}: top.txt",
+    )
+    assert target.read_bytes() == original
+    assert (there / "top.txt").read_bytes() == b"top\n"
+    assert _git(there, "status", "--porcelain") == ""
+
+
+def test_error_apply_source_below_dir_symlink_even_if_not_copied(
+    repos: tuple[Path, Path], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Deliberately broad (defense in depth): git does not list files below a symlinked
+    # folder, so docs/link/x.md is ONLY THERE and would not be copied; --apply still refuses.
+    here, there = repos
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x.md").write_text("outside\n", encoding="utf-8")
+    _symlink(here / "docs/link", outside, is_dir=True)
+    _commit(here)
+    _write(there, "docs/link/x.md", "there\n")
+    _commit(there)
+    _assert_error(
+        capsys,
+        ["--other", str(there), "--apply"],
+        f"refusing to copy a symlink from {here}: docs/link/x.md",
+    )
+    assert (there / "docs/link/x.md").read_text(encoding="utf-8") == "there\n"
+
+
+def test_symlinked_source_is_fine_without_apply(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    (here / "top.txt").unlink()
+    _symlink(here / "top.txt", here / "unshared.txt")
+    _commit(here)
+    code, out, _ = _run(capsys, "--other", str(there))
+    assert code == 1
+    assert _report(out)["top.txt"] == "DIFFERS"
+
+
+def _fail_git(
+    monkeypatch: pytest.MonkeyPatch, subcommand: str, repo_name: str | None = None
+) -> None:
+    """Make ``sync._git`` fail for ``subcommand`` (optionally only in repo ``repo_name``)."""
+    real = sync._git
+
+    def fake(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        if args[0] == subcommand and (repo_name is None or Path(repo).name == repo_name):
+            return subprocess.CompletedProcess(
+                ["git", *args], 128, stdout="", stderr="fatal: simulated\n"
+            )
+        result: subprocess.CompletedProcess[str] = real(repo, *args)
+        return result
+
+    monkeypatch.setattr(sync, "_git", fake)
+
+
+@pytest.mark.parametrize("repo_name", ["here", "there"])
+def test_error_ls_files_fails(
+    repos: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    repo_name: str,
+) -> None:
+    here, there = repos
+    _fail_git(monkeypatch, "ls-files", repo_name)
+    repo = here if repo_name == "here" else there
+    code, out, err = _run(capsys, "--other", str(there))
+    assert code == 2
+    assert out == ""
+    assert err == f"error: git ls-files failed in {repo}: fatal: simulated\n"
+
+
+@pytest.mark.parametrize("repo_name", ["here", "there"])
+def test_error_apply_git_status_fails(
+    repos: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    repo_name: str,
+) -> None:
+    here, there = repos
+    _write(here, "top.txt", "top changed\n")
+    _commit(here)
+    _fail_git(monkeypatch, "status", repo_name)
+    code, out, err = _run(capsys, "--other", str(there), "--apply")
+    assert code == 2
+    assert out == ""
+    repo = here if repo_name == "here" else there
+    assert err == f"error: git status failed in {repo}: fatal: simulated\n"
+    assert (there / "top.txt").read_bytes() == b"top\n"
 
 
 def test_apply_on_detached_head(
