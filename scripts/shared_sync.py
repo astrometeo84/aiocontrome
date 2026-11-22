@@ -201,8 +201,10 @@ def check_apply_source(here: Path, results: list[tuple[str, Status]]) -> None:
     Only the selected shared files are checked; other changes in ``here`` do not matter.
     Deliberately broader than ``check_copy_targets``: every selected file counts, whatever
     its status, so a symlink in the source is refused even where nothing would be copied.
+    The list of shared files is always checked: it decides the selection, even when no
+    pattern matches the list itself.
     """
-    selected = {name for name, _ in results}
+    selected = {name for name, _ in results} | {str(LIST_FILE)}
     status = _git(here, "status", "--porcelain", "-z", "--no-renames", "--untracked-files=all")
     if status.returncode != 0:
         raise SyncError(f"git status failed in {here}: {status.stderr.strip()}")

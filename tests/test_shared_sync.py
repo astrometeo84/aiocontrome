@@ -706,6 +706,56 @@ def test_error_apply_staged_rename_in_source(
     assert not (there / "docs/c.md").exists()
 
 
+UNLISTED_LIST = "top.txt\ndocs/**\n"  # does not match .claude/shared-files.txt itself
+
+
+def test_error_apply_uncommitted_list_even_if_not_listed(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, ".claude/shared-files.txt", UNLISTED_LIST)
+    _write(here, "top.txt", "top changed\n")
+    _commit(here)
+    _write(here, ".claude/shared-files.txt", UNLISTED_LIST + "# uncommitted\n")
+    _assert_error(
+        capsys,
+        ["--other", str(there), "--apply"],
+        "shared files: .claude/shared-files.txt; commit them first",
+    )
+    assert (there / "top.txt").read_bytes() == b"top\n"
+
+
+def test_error_apply_symlinked_list_even_if_not_listed(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, "list.txt", UNLISTED_LIST)
+    (here / ".claude/shared-files.txt").unlink()
+    _symlink(here / ".claude/shared-files.txt", here / "list.txt")
+    _write(here, "top.txt", "top changed\n")
+    _commit(here)  # committed, so only the symlink check can refuse
+    assert _git(here, "status", "--porcelain") == ""
+    _assert_error(
+        capsys,
+        ["--other", str(there), "--apply"],
+        f"refusing to copy a symlink from {here}: .claude/shared-files.txt",
+    )
+    assert (there / "top.txt").read_bytes() == b"top\n"
+
+
+def test_apply_with_committed_unlisted_list(
+    repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    here, there = repos
+    _write(here, ".claude/shared-files.txt", UNLISTED_LIST)
+    _write(here, "top.txt", "top changed\n")
+    _commit(here)
+    code, out, _ = _run(capsys, "--other", str(there), "--apply")
+    assert code == 0
+    assert "copied        top.txt" in out
+    assert ".claude/shared-files.txt" not in out
+
+
 def test_apply_ignores_dirty_unshared_source_files(
     repos: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:

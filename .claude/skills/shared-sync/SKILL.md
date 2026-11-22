@@ -74,7 +74,8 @@ before anything is copied) if
   without committing (only the shared files are checked; other changes here do not matter),
 - a selected shared file in this repository is a symlink or lies below a symlinked folder.
 
-Both checks cover every selected shared file, also those that would not be copied. So
+Both checks cover every selected shared file, also those that would not be copied, and
+always `.claude/shared-files.txt` itself, even if no pattern matches it. So
 commit the shared files here first, then sync. The report and `--diff` work on the working
 tree as before and are not affected by these checks.
 
