@@ -67,13 +67,23 @@ hand whether the file should be added here or removed there. `--apply` refuses t
 the other repository has uncommitted changes or has `main` checked out, and it never writes
 through a symlink or outside the other repository.
 
+**The source for `--apply` is a committed state.** `--apply` also refuses to run (exit `2`,
+before anything is copied) if
+
+- a selected shared file in **this** repository is modified, staged, untracked or deleted
+  without committing (only the shared files are checked; other changes here do not matter),
+- a selected shared file in this repository is a symlink or lies below a symlinked folder.
+
+So commit the shared files here first, then sync. The report and `--diff` work on the
+working tree as before and are not affected by these checks.
+
 Files that git lists but that were deleted without committing count as not present.
 Ignored files (`.gitignore`) never count; untracked, not ignored files do.
 
 Exit codes: `0` all identical (or identical after `--apply`), `1` differences remain
 (including `ONLY THERE` after `--apply`), `2` error (list missing or empty, absolute pattern
 or `..`, pattern without match in both repositories, `--other` not a git repository or the
-same repository, `--apply` preconditions not met).
+same repository, `git` failing, `--apply` preconditions not met in either repository).
 
 ## Adding a shared file
 
